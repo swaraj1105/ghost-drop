@@ -20,6 +20,9 @@ export default function GhostPage() {
   const [isConnected, setIsConnected] = useState(false);
   const [incomingFile, setIncomingFile] = useState<{name: string, data: string} | null>(null);
   
+  // --- UI STATE (NEW) ---
+  const [isCopied, setIsCopied] = useState(false);
+
   // --- STEGANOGRAPHY STATE ---
   const [stegMode, setStegMode] = useState<"ENCODE" | "DECODE">("ENCODE");
   const [secretMessage, setSecretMessage] = useState("");
@@ -27,8 +30,15 @@ export default function GhostPage() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [hasCopied, setHasCopied] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // --- HELPER: COPY FUNCTION (NEW) ---
+  const copyToClipboard = () => {
+    if (!roomId) return;
+    navigator.clipboard.writeText(roomId);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
 
   // --- SENDER LOGIC ---
   const startBroadcast = async () => {
@@ -233,7 +243,19 @@ export default function GhostPage() {
                    {roomId && (
                      <div className="mb-8 flex flex-col items-center gap-4">
                        <div className="bg-white p-4 rounded-xl"><QRCode value={roomId} size={150} /></div>
-                       <div className="bg-neutral-950 px-6 py-3 rounded-lg border border-neutral-800"><span className="text-3xl font-mono tracking-widest text-emerald-400">{roomId}</span></div>
+                       
+                       {/* --- NEW COPY BUTTON CODE START --- */}
+                       <button 
+                         onClick={copyToClipboard}
+                         className="group bg-neutral-950 px-6 py-3 rounded-lg border border-neutral-800 flex items-center gap-4 hover:border-emerald-500/50 transition-all cursor-pointer"
+                       >
+                         <span className="text-3xl font-mono tracking-widest text-emerald-400">{roomId}</span>
+                         <div className="text-emerald-500/50 group-hover:text-emerald-400 transition-colors">
+                            {isCopied ? <Check size={20} /> : <Copy size={20} />}
+                         </div>
+                       </button>
+                       {/* --- NEW COPY BUTTON CODE END --- */}
+                       
                      </div>
                    )}
                    <div className="relative group max-w-md mx-auto">

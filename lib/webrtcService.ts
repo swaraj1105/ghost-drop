@@ -1,16 +1,36 @@
 import { db } from "./firebase";
 import { ref, set, onValue, push, child, get, off } from "firebase/database";
 
-// Configuration
+// --- CONFIGURATION ---
 const CHUNK_SIZE = 16384; // 16KB chunks (Safe for all browsers)
+
+// 🔴 TODO: PASTE YOUR KEYS FROM METERED.CA HERE
+const turnConfig = {
+  username: "b2a583d749e6fdae5c44fed8",   // <--- Paste Username inside quotes
+  credential: "HkKTFviwH7/Iqn1A	", // <--- Paste Credential inside quotes
+  
+  // Keep these URLs exactly as they are
+  urls: [
+    "stun:stun.relay.metered.ca:80",
+    "turn:global.turn.metered.ca:80?transport=udp",
+    "turn:global.turn.metered.ca:80?transport=tcp",
+    "turn:global.turn.metered.ca:443?transport=tcp"
+  ]
+};
 
 const servers = {
   iceServers: [
-    { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
+    { 
+      // Google STUN (Backup)
+      urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] 
+    },
+    // Your Custom TURN (Primary for 4G/5G)
+    turnConfig
   ],
   iceCandidatePoolSize: 10,
 };
 
+// --- GLOBAL VARIABLES ---
 let pc: RTCPeerConnection | null = null;
 let dataChannel: RTCDataChannel | null = null;
 
@@ -42,21 +62,19 @@ export const createRoom = async (onChannelOpen: () => void, onMessage: (data: an
   const offer = { sdp: offerDescription.sdp, type: offerDescription.type };
   await set(roomRef, { offer });
 
-  // 🔴 FIX: Listen ONLY to the "answer" node, not the whole room
+  // Listen ONLY for the answer (Fixes Race Condition)
   onValue(child(roomRef, "answer"), (snapshot) => {
     const data = snapshot.val();
-    
-    // 🔴 FIX: Strict State Check - Only proceed if we are waiting for an answer
     if (pc && pc.signalingState === "have-local-offer" && data) {
       const answerDescription = new RTCSessionDescription(data);
-      pc.setRemoteDescription(answerDescription).catch((e) => console.log("Already connected, ignoring duplicate answer."));
+      pc.setRemoteDescription(answerDescription).catch(e => console.log("Ignore duplicate answer"));
     }
   });
 
   onValue(child(roomRef, "calleeCandidates"), (snapshot) => {
     snapshot.forEach((childSnapshot) => {
       const candidate = new RTCIceCandidate(childSnapshot.val());
-      pc?.addIceCandidate(candidate).catch((e) => {});
+      pc?.addIceCandidate(candidate).catch(e => {});
     });
   });
 
@@ -98,7 +116,7 @@ export const joinRoom = async (roomId: string, onChannelOpen: () => void, onMess
   onValue(child(roomRef, "callerCandidates"), (snapshot) => {
     snapshot.forEach((childSnapshot) => {
       const candidate = new RTCIceCandidate(childSnapshot.val());
-      pc?.addIceCandidate(candidate).catch((e) => {});
+      pc?.addIceCandidate(candidate).catch(e => {});
     });
   });
 };
@@ -143,18 +161,16 @@ function setupChannel(channel: RTCDataChannel, onOpen: () => void, onMessage: (d
 export const sendData = (data: string) => {
   if (dataChannel && dataChannel.readyState === "open") {
     
-    // 1. Calculate chunks
     const totalChunks = Math.ceil(data.length / CHUNK_SIZE);
     
-    // 2. Send Header
+    // Send Header
     dataChannel.send(`HEAD:${totalChunks}`);
 
-    // 3. Send Chunks
+    // Send Chunks
     for (let i = 0; i < data.length; i += CHUNK_SIZE) {
         const chunk = data.slice(i, i + CHUNK_SIZE);
         dataChannel.send(chunk);
     }
-
   } else {
     console.error("Connection not open");
   }

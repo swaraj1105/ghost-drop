@@ -113,7 +113,15 @@ export default function GhostPage() {
           setStatus("Peer Connected. Tunnel Open.");
           setIsConnected(true);
         },
-        (blob, name) => console.log("Received back:", name)
+        (blob, name) => console.log("Received back:", name),
+        // 🔴 NEW: Handle "Room Destroyed" (If Receiver clicks back)
+        () => {
+           // We only show the modal if WE didn't initiate the disconnect
+           // (This check prevents the modal from showing when YOU click back)
+           if (isConnected) { 
+             handleDisconnect(true);
+           }
+        }
       );
       setRoomId(id);
       setStatus("Waiting for Receiver...");
@@ -241,9 +249,9 @@ export default function GhostPage() {
                 <AlertTriangle size={24} />
               </div>
               <h3 className="text-xl font-bold text-white">Connection Terminated</h3>
-              <p className="text-neutral-400 text-sm">
-                The sender has destroyed the room. The frequency is now dead.
-              </p>
+                <p className="text-neutral-400 text-sm">
+                  The connection was terminated by the peer. The frequency is now dead.
+                </p>
               <button 
                 onClick={() => setShowExitModal(false)}
                 className="mt-4 w-full bg-red-600 hover:bg-red-500 text-white font-medium py-3 rounded-xl transition-all"

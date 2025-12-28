@@ -35,7 +35,11 @@ let receivedBytes = 0;
 /**
  * 1. SENDER: Creates a Room
  */
-export const createRoom = async (onChannelOpen: () => void, onFileReceived: (blob: Blob, name: string) => void) => {
+export const createRoom = async (
+  onChannelOpen: () => void, 
+  onFileReceived: (blob: Blob, name: string) => void,
+  onRoomDestroyed: () => void // <--- NEW CALLBACK
+) => {
   if (pc) pc.close();
   pc = new RTCPeerConnection(servers);
 
@@ -62,15 +66,20 @@ export const createRoom = async (onChannelOpen: () => void, onFileReceived: (blo
   });
 
   onValue(child(roomRef, "calleeCandidates"), (snapshot) => {
-    // 🔴 FIX: Added curly braces { } to satisfy TypeScript void return type
     snapshot.forEach((c) => {
       pc?.addIceCandidate(new RTCIceCandidate(c.val())).catch(e => {});
     });
   });
 
+  // 🔴 NEW: Watch if the room gets destroyed (by Receiver)
+  onValue(roomRef, (snapshot) => {
+    if (!snapshot.exists()) {
+       onRoomDestroyed();
+    }
+  });
+
   return roomId;
 };
-
 /**
  * 2. RECEIVER: Joins a Room
  */

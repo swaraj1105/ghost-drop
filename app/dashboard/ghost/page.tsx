@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useState, useRef, ChangeEvent } from "react";
+import React, { useState, useRef, ChangeEvent, useEffect } from "react";
 // Make sure to run: npm install react-qr-code
 import QRCode from "react-qr-code"; 
-import { createRoom, joinRoom, sendData } from "@/lib/webrtcService";
+import { createRoom, joinRoom, sendFile, destroyRoom } from "@/lib/webrtcService";
 import { 
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
-  Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck
+  Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck,
+  AlertTriangle, X
 } from "lucide-react";
 
 export default function GhostPage() {
@@ -18,10 +19,38 @@ export default function GhostPage() {
   const [roomId, setRoomId] = useState("");
   const [status, setStatus] = useState("Initializing...");
   const [isConnected, setIsConnected] = useState(false);
-  const [incomingFile, setIncomingFile] = useState<{name: string, data: string} | null>(null);
-  
-  // --- UI STATE (NEW) ---
+  // 🔴 UPDATED: Array for multiple files
+  const [receivedFiles, setReceivedFiles] = useState<{name: string, data: string}[]>([]); 
+
+  // --- SENDER BATCH STATE ---
+  const [fileQueue, setFileQueue] = useState<File[]>([]);
+
+  const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFileQueue(prev => [...prev, ...Array.from(e.target.files!)]);
+    }
+  };
+
+  const removeFile = (indexToRemove: number) => {
+    setFileQueue(prev => prev.filter((_, index) => index !== indexToRemove));
+  };
+
+  const sendBatch = async () => {
+    if (fileQueue.length === 0) return;
+    
+    for (let i = 0; i < fileQueue.length; i++) {
+      const file = fileQueue[i];
+      setStatus(`Streaming [${i + 1}/${fileQueue.length}]: ${file.name}...`);
+      await sendFile(file);
+    }
+    
+    setStatus("All Transfers Complete.");
+    setFileQueue([]); 
+  };
+
+  // --- UI STATE ---
   const [isCopied, setIsCopied] = useState(false);
+  const [showExitModal, setShowExitModal] = useState(false);
 
   // --- STEGANOGRAPHY STATE ---
   const [stegMode, setStegMode] = useState<"ENCODE" | "DECODE">("ENCODE");
@@ -32,13 +61,47 @@ export default function GhostPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // --- HELPER: COPY FUNCTION (NEW) ---
+  // --- HELPER: COPY FUNCTION ---
   const copyToClipboard = () => {
     if (!roomId) return;
     navigator.clipboard.writeText(roomId);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
   };
+
+  // --- HELPER: DOWNLOAD FUNCTION ---
+  const downloadFile = (file: {name: string, data: string}) => {
+    const link = document.createElement("a");
+    link.href = file.data;
+    link.download = file.name;
+    link.click();
+  };
+
+  // --- CLEANUP LOGIC ---
+  const handleDisconnect = async (showModal = false) => {
+    if (roomId) {
+      await destroyRoom(roomId);
+      setRoomId("");
+    }
+    setStatus("Idle");
+    setIsConnected(false);
+    setReceivedFiles([]); // Clear receiver list
+    setFileQueue([]);     // Clear sender queue
+    setTransferMode("IDLE");
+    if (showModal) setShowExitModal(true);
+  };
+
+  // Auto-destroy if user closes the tab
+  useEffect(() => {
+    const handleTabClose = () => {
+      if (roomId) destroyRoom(roomId);
+    };
+    window.addEventListener("beforeunload", handleTabClose);
+    return () => {
+      window.removeEventListener("beforeunload", handleTabClose);
+      if (roomId) destroyRoom(roomId);
+    };
+  }, [roomId]);
 
   // --- SENDER LOGIC ---
   const startBroadcast = async () => {
@@ -50,7 +113,7 @@ export default function GhostPage() {
           setStatus("Peer Connected. Tunnel Open.");
           setIsConnected(true);
         },
-        (data) => console.log("Received:", data)
+        (blob, name) => console.log("Received back:", name)
       );
       setRoomId(id);
       setStatus("Waiting for Receiver...");
@@ -58,20 +121,6 @@ export default function GhostPage() {
       console.error(e);
       setStatus("Connection Error");
     }
-  };
-
-  const handleFileDrop = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !isConnected) return;
-
-    setStatus(`Encrypting ${file.name}...`);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64Data = event.target?.result as string;
-      sendData(JSON.stringify({ name: file.name, data: base64Data }));
-      setStatus("File Sent Successfully.");
-    };
-    reader.readAsDataURL(file);
   };
 
   // --- RECEIVER LOGIC ---
@@ -82,31 +131,26 @@ export default function GhostPage() {
       await joinRoom(
         roomId,
         () => {
-          setStatus("Connected to Source.");
+          setStatus("Secure Tunnel Established. Listening...");
           setIsConnected(true);
         },
-        (rawData) => {
-          setStatus("Receiving Data...");
-          const payload = JSON.parse(rawData);
-          setIncomingFile(payload);
-          setStatus("Transfer Complete.");
+        (blob, fileName) => {
+          setStatus("Data Fragment Received.");
+          const url = URL.createObjectURL(blob);
+          // 🔴 APPEND TO LIST
+          setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
+        },
+        () => {
+          handleDisconnect(true);
         }
       );
     } catch (err) {
-      alert("Invalid Room ID");
+      alert("Invalid Room ID or Room no longer exists.");
       setStatus("Connection Failed");
     }
   };
 
-  const downloadReceivedFile = () => {
-    if (!incomingFile) return;
-    const link = document.createElement("a");
-    link.href = incomingFile.data;
-    link.download = incomingFile.name;
-    link.click();
-  };
-
-  // --- STEGANOGRAPHY LOGIC ---
+  // --- STEGANOGRAPHY LOGIC (Unchanged) ---
   const handleStegUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -144,13 +188,11 @@ export default function GhostPage() {
                  binaryMessage += secretMessage.charCodeAt(i).toString(2).padStart(8, "0");
              }
              binaryMessage += "00000000"; 
-
              if (binaryMessage.length > (data.length / 4) * 3) {
                  alert("Message too long");
                  setIsProcessing(false);
                  return;
              }
-
              let bitIndex = 0;
              for (let i = 0; i < data.length; i += 4) {
                  if (bitIndex >= binaryMessage.length) break;
@@ -186,8 +228,32 @@ export default function GhostPage() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans p-6 md:p-12 selection:bg-indigo-500/30">
+    <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans p-6 md:p-12 selection:bg-indigo-500/30 relative">
       <canvas ref={canvasRef} className="hidden" />
+
+      {/* CUSTOM DISCONNECT MODAL */}
+      {showExitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-neutral-900 border border-red-500/30 p-8 rounded-2xl max-w-sm w-full shadow-2xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-red-500"></div>
+            <div className="flex flex-col items-center text-center gap-4">
+              <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center text-red-500 mb-2">
+                <AlertTriangle size={24} />
+              </div>
+              <h3 className="text-xl font-bold text-white">Connection Terminated</h3>
+              <p className="text-neutral-400 text-sm">
+                The sender has destroyed the room. The frequency is now dead.
+              </p>
+              <button 
+                onClick={() => setShowExitModal(false)}
+                className="mt-4 w-full bg-red-600 hover:bg-red-500 text-white font-medium py-3 rounded-xl transition-all"
+              >
+                Back
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-5xl mx-auto space-y-8">
         <header className="flex items-center justify-between pb-8 border-b border-neutral-900">
@@ -235,62 +301,161 @@ export default function GhostPage() {
                 </div>
               )}
 
+              {/* --- SENDER UI --- */}
               {transferMode === "SEND" && (
-                <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl p-8 backdrop-blur-sm text-center">
-                   <button onClick={() => setTransferMode("IDLE")} className="flex items-center text-xs font-medium text-neutral-500 hover:text-white mb-6"><ArrowLeft className="w-4 h-4 mr-1" /> Back</button>
-                   <h2 className="text-2xl font-semibold text-white mb-2">Broadcasting Signal</h2>
-                   <p className="text-indigo-400 text-sm mb-6 font-mono">{status}</p>
-                   {roomId && (
-                     <div className="mb-8 flex flex-col items-center gap-4">
-                       <div className="bg-white p-4 rounded-xl"><QRCode value={roomId} size={150} /></div>
-                       
-                       {/* --- NEW COPY BUTTON CODE START --- */}
-                       <button 
-                         onClick={copyToClipboard}
-                         className="group bg-neutral-950 px-6 py-3 rounded-lg border border-neutral-800 flex items-center gap-4 hover:border-emerald-500/50 transition-all cursor-pointer"
-                       >
-                         <span className="text-3xl font-mono tracking-widest text-emerald-400">{roomId}</span>
-                         <div className="text-emerald-500/50 group-hover:text-emerald-400 transition-colors">
-                            {isCopied ? <Check size={20} /> : <Copy size={20} />}
-                         </div>
-                       </button>
-                       {/* --- NEW COPY BUTTON CODE END --- */}
-                       
-                     </div>
-                   )}
-                   <div className="relative group max-w-md mx-auto">
-                      <input type="file" onChange={handleFileDrop} disabled={!isConnected} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                      <div className={`border-2 border-dashed rounded-xl p-12 transition-all ${isConnected ? "border-emerald-500/50 hover:bg-emerald-500/10 cursor-pointer" : "border-neutral-800 opacity-50 cursor-not-allowed"}`}>
-                          <FileUp className={`w-10 h-10 mx-auto mb-4 ${isConnected ? "text-emerald-500" : "text-neutral-600"}`} />
-                          <p className="text-neutral-300 font-medium">{isConnected ? "Drop File to Send" : "Waiting for Connection..."}</p>
-                      </div>
-                   </div>
+                <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl p-8 backdrop-blur-sm min-h-[600px] flex flex-col">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-6">
+                        <button onClick={() => handleDisconnect(false)} className="flex items-center text-xs font-medium text-neutral-500 hover:text-white transition-colors"><ArrowLeft className="w-4 h-4 mr-1" /> Back</button>
+                    </div>
+
+                    {/* PHASE 1: QR CODE (Broadcasting) */}
+                    {!isConnected && (
+                        <div className="flex-1 flex flex-col items-center justify-center space-y-8 animate-in fade-in">
+                            <h2 className="text-2xl font-semibold text-white animate-pulse">Waiting for Receiver...</h2>
+                            {roomId && (
+                                <div className="bg-white p-4 rounded-xl shadow-[0_0_30px_rgba(99,102,241,0.15)]">
+                                    <QRCode value={roomId} size={180} />
+                                </div>
+                            )}
+                            <button 
+                              onClick={copyToClipboard}
+                              className="group flex items-center gap-4 bg-neutral-950 px-8 py-4 rounded-xl border border-neutral-800 hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all cursor-pointer"
+                            >
+                              <span className="text-4xl font-mono tracking-widest text-indigo-400 font-bold drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">
+                                  {roomId}
+                              </span>
+                              <div className="text-neutral-600 group-hover:text-indigo-400 transition-colors">
+                                  {isCopied ? <Check size={24} className="animate-in zoom-in" /> : <Copy size={24} />}
+                              </div>
+                            </button>
+                        </div>
+                    )}
+
+                    {/* PHASE 2: BATCH TRANSFER (Connected) */}
+                    {isConnected && (
+                        <div className="flex-1 grid md:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4">
+                            {/* LEFT: File Manifest */}
+                            <div className="bg-neutral-950/50 rounded-xl border border-neutral-800 p-4 flex flex-col">
+                                <div className="flex items-center justify-between mb-4 pb-2 border-b border-neutral-800">
+                                    <h3 className="text-white font-medium flex items-center gap-2"><FileUp size={16}/> Selected Files</h3>
+                                    <span className="text-xs text-neutral-500">{fileQueue.length} files</span>
+                                </div>
+                                
+                                <div className="flex-1 overflow-y-auto space-y-2 max-h-[300px] pr-2 custom-scrollbar">
+                                    {fileQueue.length === 0 && <p className="text-neutral-600 text-sm text-center mt-10">No files selected</p>}
+                                    {fileQueue.map((file, idx) => (
+                                        <div key={idx} className="flex items-center justify-between bg-neutral-900 p-3 rounded-lg border border-neutral-800 group hover:border-indigo-500/30 transition-colors">
+                                            <span className="text-sm text-neutral-300 truncate max-w-[150px]">{file.name}</span>
+                                            <span className="text-xs text-neutral-600">{(file.size / 1024 / 1024).toFixed(2)} MB</span>
+                                            <button onClick={() => removeFile(idx)} className="text-neutral-600 hover:text-red-500 transition-colors"><X size={14} /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* RIGHT: Drop Zone & Actions */}
+                            <div className="flex flex-col gap-4">
+                                <div className="relative group flex-1">
+                                    <input type="file" multiple onChange={handleQueueFiles} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                                    <div className="h-full border-2 border-dashed border-neutral-700 rounded-xl flex flex-col items-center justify-center hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all group-hover:shadow-[0_0_20px_rgba(99,102,241,0.1)]">
+                                        <div className="p-4 bg-neutral-800 rounded-full mb-3 group-hover:bg-indigo-500/20 transition-colors">
+                                            <FileUp className="w-6 h-6 text-neutral-400 group-hover:text-indigo-400" />
+                                        </div>
+                                        <p className="text-sm text-neutral-300 font-medium">Add files to queue</p>
+                                        <p className="text-xs text-neutral-600 mt-1">or drag and drop</p>
+                                    </div>
+                                </div>
+
+                                <button 
+                                    onClick={sendBatch}
+                                    disabled={fileQueue.length === 0}
+                                    className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${fileQueue.length > 0 ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "bg-neutral-800 text-neutral-600 cursor-not-allowed"}`}
+                                >
+                                    <Zap size={18} /> SEND {fileQueue.length} FILES
+                                </button>
+                            </div>
+                        </div>
+                    )}
                 </div>
               )}
 
+              {/* --- RECEIVER UI --- */}
               {transferMode === "RECEIVE" && (
-                 <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl p-8 backdrop-blur-sm max-w-xl mx-auto">
-                    <button onClick={() => setTransferMode("IDLE")} className="flex items-center text-xs font-medium text-neutral-500 hover:text-white mb-6"><ArrowLeft className="w-4 h-4 mr-1" /> Back</button>
-                    <div className="text-center mb-8">
-                      <h2 className="text-2xl font-semibold text-white">Tune Frequency</h2>
-                      <p className="text-violet-400 text-sm mt-2">{status}</p>
+                  <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl p-8 backdrop-blur-sm max-w-xl mx-auto min-h-[500px] flex flex-col">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-8">
+                        <button onClick={() => handleDisconnect(false)} className="flex items-center text-xs font-medium text-neutral-500 hover:text-white transition-colors"><ArrowLeft className="w-4 h-4 mr-1" /> Back</button>
+                        <p className="text-violet-400 font-mono text-xs animate-pulse">{status}</p>
                     </div>
-                    {!incomingFile ? (
-                      <div className="space-y-4">
-                          <input type="text" placeholder="Enter 6-digit Code" onChange={(e) => setRoomId(e.target.value)} value={roomId} className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center text-lg tracking-widest font-mono text-white focus:outline-none focus:border-violet-500"/>
-                          <button onClick={tuneFrequency} className="w-full bg-violet-600 hover:bg-violet-500 text-white font-medium py-3 rounded-xl transition-all shadow-lg">Connect to Tunnel</button>
-                      </div>
+
+                    {/* PHASE 1: ENTER CODE */}
+                    {!isConnected ? (
+                        <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-in fade-in">
+                            <div className="text-center">
+                                <h2 className="text-2xl font-semibold text-white">Tune Frequency</h2>
+                                <p className="text-neutral-500 text-sm mt-2">Enter 6-digit access code to receive data.</p>
+                            </div>
+                            
+                            <div className="w-full space-y-4">
+                                <input 
+                                type="text" 
+                                placeholder="000 000" 
+                                onChange={(e) => setRoomId(e.target.value)} 
+                                value={roomId} 
+                                className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center text-2xl tracking-[0.5em] font-mono text-white focus:outline-none focus:border-violet-500 transition-all placeholder:text-neutral-800"
+                                />
+                                <button 
+                                onClick={tuneFrequency} 
+                                className="w-full bg-violet-600 hover:bg-violet-500 text-white font-medium py-4 rounded-xl transition-all shadow-lg shadow-violet-900/20 flex items-center justify-center gap-2"
+                                >
+                                <Zap className="w-4 h-4 fill-current" /> Connect to Tunnel
+                                </button>
+                            </div>
+                        </div>
                     ) : (
-                      <div className="text-center space-y-4">
-                          <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
-                              <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-                              <p className="text-white font-medium">File Received</p>
-                              <p className="text-sm text-neutral-400">{incomingFile.name}</p>
-                          </div>
-                          <button onClick={downloadReceivedFile} className="w-full bg-white text-black hover:bg-neutral-200 font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"><Download className="w-4 h-4" /> Download File</button>
-                      </div>
+                        /* PHASE 2: FILE LIST (The Data Heist UI) */
+                        <div className="flex-1 flex flex-col animate-in slide-in-from-bottom-4 duration-500">
+                            <div className="flex items-center justify-between mb-4 pb-2 border-b border-neutral-800">
+                                <h3 className="text-white font-medium flex items-center gap-2"><Download className="text-emerald-500" size={18}/> Intercepted Data</h3>
+                                <span className="text-xs text-neutral-500">{receivedFiles.length} files</span>
+                            </div>
+
+                            <div className="flex-1 bg-neutral-950/50 rounded-xl border border-neutral-800 p-2 overflow-y-auto max-h-[400px] custom-scrollbar space-y-2">
+                                {receivedFiles.length === 0 && (
+                                    <div className="h-full flex flex-col items-center justify-center text-neutral-600 space-y-3 opacity-60">
+                                        <div className="w-12 h-12 rounded-full bg-neutral-900 flex items-center justify-center">
+                                            <Signal className="animate-pulse" size={20}/>
+                                        </div>
+                                        <p className="text-sm">Listening for data stream...</p>
+                                    </div>
+                                )}
+
+                                {receivedFiles.map((file, idx) => (
+                                    <div key={idx} className="flex items-center justify-between p-4 bg-neutral-900 border border-neutral-800 rounded-xl group hover:border-emerald-500/30 transition-all animate-in slide-in-from-left-2 duration-300">
+                                        <div className="flex items-center gap-4 overflow-hidden">
+                                            <div className="w-10 h-10 bg-neutral-800 rounded-lg flex items-center justify-center text-emerald-500 group-hover:bg-emerald-500/10 transition-colors">
+                                                <CheckCircle2 size={20} />
+                                            </div>
+                                            <div className="flex flex-col overflow-hidden">
+                                                <span className="text-sm text-white font-medium truncate w-full">{file.name}</span>
+                                                <span className="text-[10px] text-emerald-500/70 uppercase tracking-wider">Received</span>
+                                            </div>
+                                        </div>
+
+                                        <button 
+                                            onClick={() => downloadFile(file)}
+                                            className="p-2 bg-white text-black rounded-lg hover:bg-emerald-400 transition-colors shadow-lg"
+                                            title="Download File"
+                                        >
+                                            <Download size={18} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     )}
-                 </div>
+                  </div>
               )}
             </div>
           )}

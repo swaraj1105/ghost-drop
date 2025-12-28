@@ -1,15 +1,13 @@
 import { db } from "./firebase";
-import { ref, set, onValue, push, child, get, off } from "firebase/database";
+import { ref, set, onValue, push, child, get, off, remove } from "firebase/database";
 
 // --- CONFIGURATION ---
-const CHUNK_SIZE = 16384; // 16KB chunks (Safe for all browsers)
+const CHUNK_SIZE = 16384; // 16KB chunks
 
-// 🔴 TODO: PASTE YOUR KEYS FROM METERED.CA HERE
+// 🔴 TODO: PASTE YOUR METERED KEYS HERE
 const turnConfig = {
-  username: "b2a583d749e6fdae5c44fed8",   // <--- Paste Username inside quotes
-  credential: "HkKTFviwH7/Iqn1A	", // <--- Paste Credential inside quotes
-  
-  // Keep these URLs exactly as they are
+  username: "PASTE_YOUR_USERNAME_HERE",
+  credential: "PASTE_YOUR_PASSWORD_HERE",
   urls: [
     "stun:stun.relay.metered.ca:80",
     "turn:global.turn.metered.ca:80?transport=udp",
@@ -20,61 +18,53 @@ const turnConfig = {
 
 const servers = {
   iceServers: [
-    { 
-      // Google STUN (Backup)
-      urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] 
-    },
-    // Your Custom TURN (Primary for 4G/5G)
+    { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
     turnConfig
   ],
   iceCandidatePoolSize: 10,
 };
 
-// --- GLOBAL VARIABLES ---
 let pc: RTCPeerConnection | null = null;
 let dataChannel: RTCDataChannel | null = null;
 
-// Variables to re-assemble the file
-let incomingBuffer: string[] = [];
-let expectedChunks = 0;
+// Receiver Variables
+let receivedChunks: ArrayBuffer[] = [];
+let metadata: { name: string, size: number, type: string } | null = null;
+let receivedBytes = 0;
 
 /**
  * 1. SENDER: Creates a Room
  */
-export const createRoom = async (onChannelOpen: () => void, onMessage: (data: any) => void) => {
+export const createRoom = async (onChannelOpen: () => void, onFileReceived: (blob: Blob, name: string) => void) => {
   if (pc) pc.close();
   pc = new RTCPeerConnection(servers);
 
   dataChannel = pc.createDataChannel("ghost-drop");
-  setupChannel(dataChannel, onChannelOpen, onMessage);
+  setupChannel(dataChannel, onChannelOpen, onFileReceived);
 
   const roomId = Math.floor(100000 + Math.random() * 900000).toString();
   const roomRef = ref(db, `rooms/${roomId}`);
   const callerCandidatesRef = child(roomRef, "callerCandidates");
 
-  pc.onicecandidate = (event) => {
-    if (event.candidate) push(callerCandidatesRef, event.candidate.toJSON());
+  pc.onicecandidate = (e) => {
+    if (e.candidate) push(callerCandidatesRef, e.candidate.toJSON());
   };
 
-  const offerDescription = await pc.createOffer();
-  await pc.setLocalDescription(offerDescription);
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await set(roomRef, { offer: { sdp: offer.sdp, type: offer.type } });
 
-  const offer = { sdp: offerDescription.sdp, type: offerDescription.type };
-  await set(roomRef, { offer });
-
-  // Listen ONLY for the answer (Fixes Race Condition)
   onValue(child(roomRef, "answer"), (snapshot) => {
     const data = snapshot.val();
     if (pc && pc.signalingState === "have-local-offer" && data) {
-      const answerDescription = new RTCSessionDescription(data);
-      pc.setRemoteDescription(answerDescription).catch(e => console.log("Ignore duplicate answer"));
+      pc.setRemoteDescription(new RTCSessionDescription(data)).catch(e => console.log("Ignore duplicate answer"));
     }
   });
 
   onValue(child(roomRef, "calleeCandidates"), (snapshot) => {
-    snapshot.forEach((childSnapshot) => {
-      const candidate = new RTCIceCandidate(childSnapshot.val());
-      pc?.addIceCandidate(candidate).catch(e => {});
+    // 🔴 FIX: Added curly braces { } to satisfy TypeScript void return type
+    snapshot.forEach((c) => {
+      pc?.addIceCandidate(new RTCIceCandidate(c.val())).catch(e => {});
     });
   });
 
@@ -84,94 +74,123 @@ export const createRoom = async (onChannelOpen: () => void, onMessage: (data: an
 /**
  * 2. RECEIVER: Joins a Room
  */
-export const joinRoom = async (roomId: string, onChannelOpen: () => void, onMessage: (data: any) => void) => {
+export const joinRoom = async (
+  roomId: string, 
+  onChannelOpen: () => void, 
+  onFileReceived: (blob: Blob, name: string) => void,
+  onRoomDestroyed: () => void // <--- NEW CALLBACK
+) => {
   const roomRef = ref(db, `rooms/${roomId}`);
   const roomSnapshot = await get(roomRef);
-
-  if (!roomSnapshot.exists()) throw new Error("Room does not exist");
+  if (!roomSnapshot.exists()) throw new Error("Room not found");
 
   if (pc) pc.close();
   pc = new RTCPeerConnection(servers);
 
-  pc.ondatachannel = (event) => {
-    dataChannel = event.channel;
-    setupChannel(dataChannel, onChannelOpen, onMessage);
+  pc.ondatachannel = (e) => {
+    dataChannel = e.channel;
+    setupChannel(dataChannel, onChannelOpen, onFileReceived);
   };
 
   const calleeCandidatesRef = child(roomRef, "calleeCandidates");
-  
-  pc.onicecandidate = (event) => {
-    if (event.candidate) push(calleeCandidatesRef, event.candidate.toJSON());
+  pc.onicecandidate = (e) => {
+    if (e.candidate) push(calleeCandidatesRef, e.candidate.toJSON());
   };
 
-  const offer = roomSnapshot.val().offer;
-  await pc.setRemoteDescription(new RTCSessionDescription(offer));
-
-  const answerDescription = await pc.createAnswer();
-  await pc.setLocalDescription(answerDescription);
-
-  const answer = { type: answerDescription.type, sdp: answerDescription.sdp };
-  await set(child(roomRef, "answer"), answer);
+  await pc.setRemoteDescription(new RTCSessionDescription(roomSnapshot.val().offer));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  await set(child(roomRef, "answer"), { sdp: answer.sdp, type: answer.type });
 
   onValue(child(roomRef, "callerCandidates"), (snapshot) => {
-    snapshot.forEach((childSnapshot) => {
-      const candidate = new RTCIceCandidate(childSnapshot.val());
-      pc?.addIceCandidate(candidate).catch(e => {});
+    snapshot.forEach((c) => {
+      pc?.addIceCandidate(new RTCIceCandidate(c.val())).catch(e => {});
     });
+  });
+
+  // 🔴 NEW: Watch for Room Destruction
+  onValue(roomRef, (snapshot) => {
+    // If snapshot becomes null/doesn't exist, the Sender deleted the room
+    if (!snapshot.exists()) {
+       onRoomDestroyed();
+    }
   });
 };
 
 /**
- * HELPER: Handle Data Channel Events (With Re-assembly Logic)
+ * HELPER: Handle Data Stream
  */
-function setupChannel(channel: RTCDataChannel, onOpen: () => void, onMessage: (data: any) => void) {
+function setupChannel(channel: RTCDataChannel, onOpen: () => void, onFileReceived: (blob: Blob, name: string) => void) {
   channel.onopen = () => {
-    console.log("👻 TUNNEL ESTABLISHED");
+    console.log("👻 TUNNEL OPEN");
     onOpen();
   };
 
-  channel.onmessage = (event) => {
+  channel.onmessage = async (event) => {
     const data = event.data;
-    
-    // Header Check
-    try {
-        if (typeof data === 'string' && data.startsWith("HEAD:")) {
-            expectedChunks = parseInt(data.split(":")[1]);
-            incomingBuffer = [];
-            console.log(`Receiving file in ${expectedChunks} chunks...`);
-            return;
-        }
-    } catch (e) {}
 
-    incomingBuffer.push(data);
+    if (typeof data === "string") {
+      metadata = JSON.parse(data);
+      receivedChunks = [];
+      receivedBytes = 0;
+      console.log(`Receiving ${metadata?.name} (${metadata?.size} bytes)`);
+      return;
+    }
 
-    if (incomingBuffer.length === expectedChunks) {
-        console.log("File re-assembled!");
-        const fullFile = incomingBuffer.join("");
-        onMessage(fullFile);
-        incomingBuffer = [];
-        expectedChunks = 0;
+    if (data instanceof ArrayBuffer) {
+      receivedChunks.push(data);
+      receivedBytes += data.byteLength;
+
+      if (metadata && receivedBytes >= metadata.size) {
+        const fileBlob = new Blob(receivedChunks);
+        onFileReceived(fileBlob, metadata.name);
+        receivedChunks = [];
+        metadata = null;
+        receivedBytes = 0;
+      }
     }
   };
 }
 
 /**
- * 3. PUBLIC: Send Data (With Chunking)
+ * 3. PUBLIC: Send File (Streaming Mode)
  */
-export const sendData = (data: string) => {
-  if (dataChannel && dataChannel.readyState === "open") {
-    
-    const totalChunks = Math.ceil(data.length / CHUNK_SIZE);
-    
-    // Send Header
-    dataChannel.send(`HEAD:${totalChunks}`);
+export const sendFile = async (file: File) => {
+  if (!dataChannel || dataChannel.readyState !== "open") return;
 
-    // Send Chunks
-    for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-        const chunk = data.slice(i, i + CHUNK_SIZE);
-        dataChannel.send(chunk);
+  const meta = JSON.stringify({ name: file.name, size: file.size, type: file.type });
+  dataChannel.send(meta);
+
+  let offset = 0;
+  while (offset < file.size) {
+    const slice = file.slice(offset, offset + CHUNK_SIZE);
+    const buffer = await slice.arrayBuffer();
+    
+    if (dataChannel.bufferedAmount > 16 * 1024 * 1024) {
+        await new Promise(r => setTimeout(r, 100));
     }
-  } else {
-    console.error("Connection not open");
+    
+    dataChannel.send(buffer);
+    offset += CHUNK_SIZE;
   }
+};
+
+/**
+ * 4. CLEANUP: Self-Destruct Room
+ */
+export const destroyRoom = async (roomId: string) => {
+  if (!roomId) return;
+  
+  if (pc) {
+    pc.close();
+    pc = null;
+  }
+  if (dataChannel) {
+    dataChannel.close();
+    dataChannel = null;
+  }
+
+  const roomRef = ref(db, `rooms/${roomId}`);
+  await remove(roomRef);
+  console.log(`💥 Room ${roomId} destroyed.`);
 };

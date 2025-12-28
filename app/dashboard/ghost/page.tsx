@@ -19,11 +19,13 @@ export default function GhostPage() {
   const [roomId, setRoomId] = useState("");
   const [status, setStatus] = useState("Initializing...");
   const [isConnected, setIsConnected] = useState(false);
-  // 🔴 UPDATED: Array for multiple files
   const [receivedFiles, setReceivedFiles] = useState<{name: string, data: string}[]>([]); 
 
   // --- SENDER BATCH STATE ---
   const [fileQueue, setFileQueue] = useState<File[]>([]);
+
+  // 🔴 NEW: Fix for Sender Popup (Tracks intentional disconnects)
+  const isSelfDisconnecting = useRef(false);
 
   const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -79,14 +81,19 @@ export default function GhostPage() {
 
   // --- CLEANUP LOGIC ---
   const handleDisconnect = async (showModal = false) => {
+    // 🔴 Mark as intentional disconnect so we don't trigger our own popup
+    if (!showModal) {
+        isSelfDisconnecting.current = true;
+    }
+
     if (roomId) {
       await destroyRoom(roomId);
       setRoomId("");
     }
     setStatus("Idle");
     setIsConnected(false);
-    setReceivedFiles([]); // Clear receiver list
-    setFileQueue([]);     // Clear sender queue
+    setReceivedFiles([]); 
+    setFileQueue([]);     
     setTransferMode("IDLE");
     if (showModal) setShowExitModal(true);
   };
@@ -107,6 +114,10 @@ export default function GhostPage() {
   const startBroadcast = async () => {
     setTransferMode("SEND");
     setStatus("Generating Secure Frequency...");
+    
+    // 🔴 Reset flag on start
+    isSelfDisconnecting.current = false;
+
     try {
       const id = await createRoom(
         () => {
@@ -114,11 +125,11 @@ export default function GhostPage() {
           setIsConnected(true);
         },
         (blob, name) => console.log("Received back:", name),
-        // 🔴 NEW: Handle "Room Destroyed" (If Receiver clicks back)
+        
+        // 🔴 FIXED CALLBACK: Logic runs correctly now
         () => {
-           // We only show the modal if WE didn't initiate the disconnect
-           // (This check prevents the modal from showing when YOU click back)
-           if (isConnected) { 
+           // Only show modal if WE didn't cause the disconnect
+           if (!isSelfDisconnecting.current) {
              handleDisconnect(true);
            }
         }
@@ -135,6 +146,10 @@ export default function GhostPage() {
   const tuneFrequency = async () => {
     if (!roomId) return;
     setStatus(`Connecting to ${roomId}...`);
+    
+    // 🔴 Reset flag on start
+    isSelfDisconnecting.current = false;
+
     try {
       await joinRoom(
         roomId,
@@ -145,11 +160,13 @@ export default function GhostPage() {
         (blob, fileName) => {
           setStatus("Data Fragment Received.");
           const url = URL.createObjectURL(blob);
-          // 🔴 APPEND TO LIST
           setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
         },
         () => {
-          handleDisconnect(true);
+           // Receiver always shows modal if room dies while they are there
+           if (!isSelfDisconnecting.current) {
+               handleDisconnect(true);
+           }
         }
       );
     } catch (err) {
@@ -249,9 +266,9 @@ export default function GhostPage() {
                 <AlertTriangle size={24} />
               </div>
               <h3 className="text-xl font-bold text-white">Connection Terminated</h3>
-                <p className="text-neutral-400 text-sm">
-                  The connection was terminated by the peer. The frequency is now dead.
-                </p>
+              <p className="text-neutral-400 text-sm">
+                The connection was terminated by the peer. The frequency is now dead.
+              </p>
               <button 
                 onClick={() => setShowExitModal(false)}
                 className="mt-4 w-full bg-red-600 hover:bg-red-500 text-white font-medium py-3 rounded-xl transition-all"

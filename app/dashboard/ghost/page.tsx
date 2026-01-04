@@ -9,7 +9,7 @@ import {
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
   Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck,
-  AlertTriangle, X, Loader2, QrCode, Camera
+  AlertTriangle, X, Loader2, QrCode, Camera, Share2
 } from "lucide-react";
 
 export default function GhostPage() {
@@ -27,14 +27,15 @@ export default function GhostPage() {
   const [isSending, setIsSending] = useState(false);
 
   // --- TOAST STATE ---
-  const [showToast, setShowToast] = useState(false); // <--- NEW STATE
+  const [showToast, setShowToast] = useState(false);
 
   // Fix for Sender Popup (Tracks intentional disconnects)
   const isSelfDisconnecting = useRef(false);
 
-  // --- SCANNER STATE ---
+  // --- SCANNER / SHARE STATE ---
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const qrRef = useRef<HTMLDivElement>(null); // Reference for QR Code
 
   const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -61,7 +62,6 @@ export default function GhostPage() {
       setStatus("All Transfers Complete.");
       setFileQueue([]); 
       
-      // 🔴 TRIGGER TOAST
       setShowToast(true);
       setTimeout(() => setShowToast(false), 1500);
 
@@ -92,6 +92,79 @@ export default function GhostPage() {
     navigator.clipboard.writeText(roomId);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  // --- HELPER: SHARE FUNCTION (QR IMAGE OR TEXT) ---
+  const handleShare = async () => {
+    if (!roomId) return;
+
+    try {
+        // 1. Try to convert QR SVG to Image for sharing
+        if (qrRef.current) {
+            const svg = qrRef.current.querySelector("svg");
+            if (svg) {
+                const svgData = new XMLSerializer().serializeToString(svg);
+                const canvas = document.createElement("canvas");
+                const ctx = canvas.getContext("2d");
+                const img = new Image();
+                const svgBlob = new Blob([svgData], {type: "image/svg+xml;charset=utf-8"});
+                const url = URL.createObjectURL(svgBlob);
+
+                img.onload = async () => {
+                    // Set canvas size (add padding for better visuals)
+                    canvas.width = 200;
+                    canvas.height = 200;
+                    
+                    if (ctx) {
+                        // Fill white background (transparent PNGs can look bad in dark mode)
+                        ctx.fillStyle = "#FFFFFF";
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        // Draw QR centered
+                        ctx.drawImage(img, 10, 10, 180, 180);
+                    }
+
+                    URL.revokeObjectURL(url);
+
+                    canvas.toBlob(async (blob) => {
+                        if (blob) {
+                            const file = new File([blob], `ghost_drop_${roomId}.png`, { type: "image/png" });
+                            
+                            // Check if sharing files is supported
+                            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                                await navigator.share({
+                                    files: [file],
+                                    title: "GhostDrop Access Code",
+                                    text: `Scan this QR to join my secure channel. Code: ${roomId}`
+                                });
+                                return;
+                            }
+                        }
+                        // Fallback logic runs if blob fails or file share not supported
+                        shareTextFallback();
+                    });
+                };
+                img.src = url;
+                return; // Wait for onload
+            }
+        }
+        // Fallback if no QR ref found
+        shareTextFallback();
+
+    } catch (err) {
+        console.error("Share failed", err);
+        shareTextFallback();
+    }
+  };
+
+  const shareTextFallback = async () => {
+      if (navigator.share) {
+          await navigator.share({
+              title: "GhostDrop Access Code",
+              text: roomId
+          });
+      } else {
+          copyToClipboard();
+      }
   };
 
   // --- HELPER: DOWNLOAD FUNCTION ---
@@ -380,7 +453,7 @@ export default function GhostPage() {
         </div>
       )}
 
-      {/* 🔴 SUCCESS TOAST */}
+      {/* SUCCESS TOAST */}
       {showToast && (
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
           <div className="bg-neutral-900 border border-emerald-500 text-white px-6 py-3 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] flex items-center gap-3">
@@ -449,21 +522,33 @@ export default function GhostPage() {
                         <div className="flex-1 flex flex-col items-center justify-center space-y-8 animate-in fade-in">
                             <h2 className="text-2xl font-semibold text-white animate-pulse">Waiting for Receiver...</h2>
                             {roomId && (
-                                <div className="bg-white p-4 rounded-xl shadow-[0_0_30px_rgba(99,102,241,0.15)]">
+                                <div ref={qrRef} className="bg-white p-4 rounded-xl shadow-[0_0_30px_rgba(99,102,241,0.15)]">
                                     <QRCode value={roomId} size={180} />
                                 </div>
                             )}
-                            <button 
-                              onClick={copyToClipboard}
-                              className="group flex items-center gap-4 bg-neutral-950 px-8 py-4 rounded-xl border border-neutral-800 hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all cursor-pointer"
-                            >
-                              <span className="text-4xl font-mono tracking-widest text-indigo-400 font-bold drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">
-                                  {roomId}
-                              </span>
-                              <div className="text-neutral-600 group-hover:text-indigo-400 transition-colors">
-                                  {isCopied ? <Check size={24} className="animate-in zoom-in" /> : <Copy size={24} />}
-                              </div>
-                            </button>
+                            
+                            {/* CODE DISPLAY & SHARE ACTIONS */}
+                            <div className="flex items-center gap-4 w-full max-w-sm">
+                                <button 
+                                  onClick={copyToClipboard}
+                                  className="flex-1 group flex items-center justify-between bg-neutral-950 px-6 py-4 rounded-xl border border-neutral-800 hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-all cursor-pointer"
+                                >
+                                  <span className="text-2xl font-mono tracking-widest text-indigo-400 font-bold drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">
+                                      {roomId}
+                                  </span>
+                                  <div className="text-neutral-600 group-hover:text-indigo-400 transition-colors">
+                                      {isCopied ? <Check size={20} className="animate-in zoom-in" /> : <Copy size={20} />}
+                                  </div>
+                                </button>
+                                
+                                <button 
+                                    onClick={handleShare}
+                                    className="p-4 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-white shadow-lg shadow-indigo-500/20 transition-all border border-indigo-400/50"
+                                    title="Share Code/QR"
+                                >
+                                    <Share2 size={24} />
+                                </button>
+                            </div>
                         </div>
                     )}
 

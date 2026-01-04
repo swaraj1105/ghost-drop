@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useRef, ChangeEvent, useEffect } from "react";
-// Make sure to run: npm install react-qr-code html5-qrcode
+import React, { useState, useRef, ChangeEvent, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import QRCode from "react-qr-code"; 
 import { Html5Qrcode } from "html5-qrcode";
 import { createRoom, joinRoom, sendFile, destroyRoom } from "@/lib/webrtcService";
@@ -9,11 +9,12 @@ import {
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
   Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck,
-  AlertTriangle, X, Loader2, QrCode, Camera, Share2
+  AlertTriangle, X, Loader2, QrCode, Share2
 } from "lucide-react";
-import { useSearchParams } from "next/navigation"; // <--- ADD THIS
 
-export default function GhostPage() {
+// --- 1. MAIN LOGIC COMPONENT (Moved inside) ---
+function GhostContent() {
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<"GHOST_DROP" | "STEGANOGRAPHY">("GHOST_DROP");
   const [transferMode, setTransferMode] = useState<"IDLE" | "SEND" | "RECEIVE">("IDLE");
 
@@ -33,23 +34,19 @@ export default function GhostPage() {
   // Fix for Sender Popup (Tracks intentional disconnects)
   const isSelfDisconnecting = useRef(false);
 
-  // --- AUTO-START LOGIC ---
-  const searchParams = useSearchParams();
-
-  useEffect(() => {
-    // Check if the URL has ?action=broadcast
-    const action = searchParams.get("action");
-
-    // If "broadcast" is requested and we are currently Idle, start immediately
-    if (action === "broadcast" && transferMode === "IDLE") {
-      startBroadcast();
-    }
-  }, [searchParams, transferMode]); // Runs once when page loads
-  
   // --- SCANNER / SHARE STATE ---
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const qrRef = useRef<HTMLDivElement>(null); // Reference for QR Code
+  const qrRef = useRef<HTMLDivElement>(null); 
+
+  // --- AUTO-START LOGIC (The new feature) ---
+  useEffect(() => {
+    const action = searchParams.get("action");
+    if (action === "broadcast" && transferMode === "IDLE") {
+      // Slight delay to ensure hydration matches
+      setTimeout(() => startBroadcast(), 100);
+    }
+  }, [searchParams]);
 
   const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -64,9 +61,7 @@ export default function GhostPage() {
 
   const sendBatch = async () => {
     if (fileQueue.length === 0 || isSending) return;
-    
     setIsSending(true); 
-    
     try {
       for (let i = 0; i < fileQueue.length; i++) {
         const file = fileQueue[i];
@@ -75,10 +70,8 @@ export default function GhostPage() {
       }
       setStatus("All Transfers Complete.");
       setFileQueue([]); 
-      
       setShowToast(true);
       setTimeout(() => setShowToast(false), 1500);
-
     } catch (error) {
       console.error("Transfer failed", error);
       setStatus("Transfer Interrupted.");
@@ -100,7 +93,7 @@ export default function GhostPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // --- HELPER: COPY FUNCTION ---
+  // --- HELPER FUNCTIONS ---
   const copyToClipboard = () => {
     if (!roomId) return;
     navigator.clipboard.writeText(roomId);
@@ -108,12 +101,9 @@ export default function GhostPage() {
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  // --- HELPER: SHARE FUNCTION (QR IMAGE OR TEXT) ---
   const handleShare = async () => {
     if (!roomId) return;
-
     try {
-        // 1. Try to convert QR SVG to Image for sharing
         if (qrRef.current) {
             const svg = qrRef.current.querySelector("svg");
             if (svg) {
@@ -125,25 +115,17 @@ export default function GhostPage() {
                 const url = URL.createObjectURL(svgBlob);
 
                 img.onload = async () => {
-                    // Set canvas size (add padding for better visuals)
                     canvas.width = 200;
                     canvas.height = 200;
-                    
                     if (ctx) {
-                        // Fill white background (transparent PNGs can look bad in dark mode)
                         ctx.fillStyle = "#FFFFFF";
                         ctx.fillRect(0, 0, canvas.width, canvas.height);
-                        // Draw QR centered
                         ctx.drawImage(img, 10, 10, 180, 180);
                     }
-
                     URL.revokeObjectURL(url);
-
                     canvas.toBlob(async (blob) => {
                         if (blob) {
                             const file = new File([blob], `ghost_drop_${roomId}.png`, { type: "image/png" });
-                            
-                            // Check if sharing files is supported
                             if (navigator.canShare && navigator.canShare({ files: [file] })) {
                                 await navigator.share({
                                     files: [file],
@@ -153,35 +135,27 @@ export default function GhostPage() {
                                 return;
                             }
                         }
-                        // Fallback logic runs if blob fails or file share not supported
                         shareTextFallback();
                     });
                 };
                 img.src = url;
-                return; // Wait for onload
+                return;
             }
         }
-        // Fallback if no QR ref found
         shareTextFallback();
-
     } catch (err) {
-        console.error("Share failed", err);
         shareTextFallback();
     }
   };
 
   const shareTextFallback = async () => {
       if (navigator.share) {
-          await navigator.share({
-              title: "GhostDrop Access Code",
-              text: roomId
-          });
+          await navigator.share({ title: "GhostDrop Access Code", text: roomId });
       } else {
           copyToClipboard();
       }
   };
 
-  // --- HELPER: DOWNLOAD FUNCTION ---
   const downloadFile = (file: {name: string, data: string}) => {
     const link = document.createElement("a");
     link.href = file.data;
@@ -189,12 +163,8 @@ export default function GhostPage() {
     link.click();
   };
 
-  // --- CLEANUP LOGIC ---
   const handleDisconnect = async (showModal = false) => {
-    if (!showModal) {
-        isSelfDisconnecting.current = true;
-    }
-
+    if (!showModal) isSelfDisconnecting.current = true;
     if (roomId) {
       await destroyRoom(roomId);
       setRoomId("");
@@ -207,11 +177,8 @@ export default function GhostPage() {
     if (showModal) setShowExitModal(true);
   };
 
-  // Auto-destroy if user closes the tab
   useEffect(() => {
-    const handleTabClose = () => {
-      if (roomId) destroyRoom(roomId);
-    };
+    const handleTabClose = () => { if (roomId) destroyRoom(roomId); };
     window.addEventListener("beforeunload", handleTabClose);
     return () => {
       window.removeEventListener("beforeunload", handleTabClose);
@@ -219,12 +186,10 @@ export default function GhostPage() {
     };
   }, [roomId]);
 
-  // --- SCANNER LOGIC ---
   useEffect(() => {
     if (isScanning && transferMode === "RECEIVE") {
       const html5QrCode = new Html5Qrcode("reader");
       const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-      
       html5QrCode.start(
         { facingMode: "environment" }, 
         config, 
@@ -232,9 +197,7 @@ export default function GhostPage() {
           handleScanSuccess(decodedText);
           html5QrCode.stop().catch(err => console.error(err));
         },
-        (errorMessage) => {
-          // Parse error, ignore usually
-        }
+        () => {}
       ).catch(err => console.error("Error starting scanner", err));
 
       return () => {
@@ -254,7 +217,6 @@ export default function GhostPage() {
   const handleScanFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const html5QrCode = new Html5Qrcode("reader");
     try {
       const result = await html5QrCode.scanFile(file, true);
@@ -264,12 +226,10 @@ export default function GhostPage() {
     }
   };
 
-  // --- SENDER LOGIC ---
   const startBroadcast = async () => {
     setTransferMode("SEND");
     setStatus("Generating Secure Frequency...");
     isSelfDisconnecting.current = false;
-
     try {
       const id = await createRoom(
         () => {
@@ -278,27 +238,21 @@ export default function GhostPage() {
         },
         (blob, name) => console.log("Received back:", name),
         () => {
-           if (!isSelfDisconnecting.current) {
-             handleDisconnect(true);
-           }
+           if (!isSelfDisconnecting.current) handleDisconnect(true);
         }
       );
       setRoomId(id);
       setStatus("Waiting for Receiver...");
     } catch (e) {
-      console.error(e);
       setStatus("Connection Error");
     }
   };
 
-  // --- RECEIVER LOGIC ---
   const tuneFrequency = async (manualId?: string) => {
     const targetId = manualId || roomId;
     if (!targetId) return;
-    
     setStatus(`Connecting to ${targetId}...`);
     isSelfDisconnecting.current = false;
-
     try {
       await joinRoom(
         targetId,
@@ -312,9 +266,7 @@ export default function GhostPage() {
           setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
         },
         () => {
-           if (!isSelfDisconnecting.current) {
-               handleDisconnect(true);
-           }
+           if (!isSelfDisconnecting.current) handleDisconnect(true);
         }
       );
     } catch (err) {
@@ -323,7 +275,6 @@ export default function GhostPage() {
     }
   };
 
-  // --- STEGANOGRAPHY LOGIC (Unchanged) ---
   const handleStegUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -343,7 +294,6 @@ export default function GhostPage() {
     const img = new Image();
     img.src = selectedImage;
     img.crossOrigin = "Anonymous";
-    
     img.onload = () => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -541,7 +491,6 @@ export default function GhostPage() {
                                 </div>
                             )}
                             
-                            {/* CODE DISPLAY & SHARE ACTIONS */}
                             <div className="flex items-center gap-4 w-full max-w-sm">
                                 <button 
                                   onClick={copyToClipboard}
@@ -760,4 +709,17 @@ export default function GhostPage() {
       </div>
     </div>
   )
+}
+
+// --- 2. EXPORT DEFAULT WRAPPED IN SUSPENSE ---
+export default function GhostPage() {
+  return (
+    <Suspense fallback={
+        <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-white">
+            <Loader2 className="animate-spin text-indigo-500 w-10 h-10" />
+        </div>
+    }>
+        <GhostContent />
+    </Suspense>
+  );
 }

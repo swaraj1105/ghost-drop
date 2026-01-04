@@ -26,6 +26,9 @@ export default function GhostPage() {
   const [fileQueue, setFileQueue] = useState<File[]>([]);
   const [isSending, setIsSending] = useState(false);
 
+  // --- TOAST STATE ---
+  const [showToast, setShowToast] = useState(false); // <--- NEW STATE
+
   // Fix for Sender Popup (Tracks intentional disconnects)
   const isSelfDisconnecting = useRef(false);
 
@@ -57,6 +60,11 @@ export default function GhostPage() {
       }
       setStatus("All Transfers Complete.");
       setFileQueue([]); 
+      
+      // 🔴 TRIGGER TOAST
+      setShowToast(true);
+      setTimeout(() => setShowToast(false), 1500);
+
     } catch (error) {
       console.error("Transfer failed", error);
       setStatus("Transfer Interrupted.");
@@ -134,7 +142,6 @@ export default function GhostPage() {
         { facingMode: "environment" }, 
         config, 
         (decodedText) => {
-          // Success Callback
           handleScanSuccess(decodedText);
           html5QrCode.stop().catch(err => console.error(err));
         },
@@ -144,7 +151,6 @@ export default function GhostPage() {
       ).catch(err => console.error("Error starting scanner", err));
 
       return () => {
-        // Cleanup if component unmounts or scanning stops
         if(html5QrCode.isScanning) {
             html5QrCode.stop().catch(err => console.error("Stop failed", err));
         }
@@ -155,7 +161,7 @@ export default function GhostPage() {
   const handleScanSuccess = (decodedText: string) => {
     setIsScanning(false);
     setRoomId(decodedText);
-    tuneFrequency(decodedText); // Auto-connect with the scanned ID
+    tuneFrequency(decodedText);
   };
 
   const handleScanFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -199,7 +205,6 @@ export default function GhostPage() {
   };
 
   // --- RECEIVER LOGIC ---
-  // Updated to accept an optional manualId for immediate scanning support
   const tuneFrequency = async (manualId?: string) => {
     const targetId = manualId || roomId;
     if (!targetId) return;
@@ -324,18 +329,13 @@ export default function GhostPage() {
                  <X size={20} />
                </button>
              </div>
-             
-             {/* Scanner Area */}
              <div className="relative bg-black h-[300px] flex items-center justify-center overflow-hidden">
                 <div id="reader" className="w-full h-full"></div>
-                {/* Visual Guide Overlay */}
                 <div className="absolute inset-0 border-2 border-violet-500/30 pointer-events-none"></div>
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 border-2 border-violet-500 rounded-lg shadow-[0_0_50px_rgba(139,92,246,0.3)] pointer-events-none"></div>
              </div>
-
              <div className="p-6 flex flex-col gap-3 bg-neutral-900">
                <p className="text-center text-xs text-neutral-500 mb-2">Align the QR code within the frame to connect automatically.</p>
-               
                <div className="relative">
                  <input 
                     type="file" 
@@ -376,6 +376,18 @@ export default function GhostPage() {
                 Back
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔴 SUCCESS TOAST */}
+      {showToast && (
+        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
+          <div className="bg-neutral-900 border border-emerald-500 text-white px-6 py-3 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] flex items-center gap-3">
+             <div className="bg-emerald-500 rounded-full p-1">
+               <Check size={14} className="text-black stroke-[3]" />
+             </div>
+             <span className="font-medium tracking-wide text-sm">Payload Delivered</span>
           </div>
         </div>
       )}

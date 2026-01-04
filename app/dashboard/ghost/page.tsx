@@ -1,14 +1,15 @@
 "use client";
 
 import React, { useState, useRef, ChangeEvent, useEffect } from "react";
-// Make sure to run: npm install react-qr-code
+// Make sure to run: npm install react-qr-code html5-qrcode
 import QRCode from "react-qr-code"; 
+import { Html5Qrcode } from "html5-qrcode";
 import { createRoom, joinRoom, sendFile, destroyRoom } from "@/lib/webrtcService";
 import { 
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
   Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck,
-  AlertTriangle, X, Loader2
+  AlertTriangle, X, Loader2, QrCode, Camera
 } from "lucide-react";
 
 export default function GhostPage() {
@@ -23,10 +24,14 @@ export default function GhostPage() {
 
   // --- SENDER BATCH STATE ---
   const [fileQueue, setFileQueue] = useState<File[]>([]);
-  const [isSending, setIsSending] = useState(false); // <--- NEW LOADING STATE
+  const [isSending, setIsSending] = useState(false);
 
   // Fix for Sender Popup (Tracks intentional disconnects)
   const isSelfDisconnecting = useRef(false);
+
+  // --- SCANNER STATE ---
+  const [isScanning, setIsScanning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -35,14 +40,14 @@ export default function GhostPage() {
   };
 
   const removeFile = (indexToRemove: number) => {
-    if (isSending) return; // Prevent removing while sending
+    if (isSending) return; 
     setFileQueue(prev => prev.filter((_, index) => index !== indexToRemove));
   };
 
   const sendBatch = async () => {
     if (fileQueue.length === 0 || isSending) return;
     
-    setIsSending(true); // Start loading state
+    setIsSending(true); 
     
     try {
       for (let i = 0; i < fileQueue.length; i++) {
@@ -56,7 +61,7 @@ export default function GhostPage() {
       console.error("Transfer failed", error);
       setStatus("Transfer Interrupted.");
     } finally {
-      setIsSending(false); // End loading state
+      setIsSending(false); 
     }
   };
 
@@ -91,7 +96,6 @@ export default function GhostPage() {
 
   // --- CLEANUP LOGIC ---
   const handleDisconnect = async (showModal = false) => {
-    // Mark as intentional disconnect so we don't trigger our own popup
     if (!showModal) {
         isSelfDisconnecting.current = true;
     }
@@ -120,12 +124,57 @@ export default function GhostPage() {
     };
   }, [roomId]);
 
+  // --- SCANNER LOGIC ---
+  useEffect(() => {
+    if (isScanning && transferMode === "RECEIVE") {
+      const html5QrCode = new Html5Qrcode("reader");
+      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+      
+      html5QrCode.start(
+        { facingMode: "environment" }, 
+        config, 
+        (decodedText) => {
+          // Success Callback
+          handleScanSuccess(decodedText);
+          html5QrCode.stop().catch(err => console.error(err));
+        },
+        (errorMessage) => {
+          // Parse error, ignore usually
+        }
+      ).catch(err => console.error("Error starting scanner", err));
+
+      return () => {
+        // Cleanup if component unmounts or scanning stops
+        if(html5QrCode.isScanning) {
+            html5QrCode.stop().catch(err => console.error("Stop failed", err));
+        }
+      };
+    }
+  }, [isScanning]);
+
+  const handleScanSuccess = (decodedText: string) => {
+    setIsScanning(false);
+    setRoomId(decodedText);
+    tuneFrequency(decodedText); // Auto-connect with the scanned ID
+  };
+
+  const handleScanFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const html5QrCode = new Html5Qrcode("reader");
+    try {
+      const result = await html5QrCode.scanFile(file, true);
+      handleScanSuccess(result);
+    } catch (err) {
+      alert("Could not find a valid QR code in this image.");
+    }
+  };
+
   // --- SENDER LOGIC ---
   const startBroadcast = async () => {
     setTransferMode("SEND");
     setStatus("Generating Secure Frequency...");
-    
-    // Reset flag on start
     isSelfDisconnecting.current = false;
 
     try {
@@ -135,10 +184,7 @@ export default function GhostPage() {
           setIsConnected(true);
         },
         (blob, name) => console.log("Received back:", name),
-        
-        // Callback: Logic runs correctly now
         () => {
-           // Only show modal if WE didn't cause the disconnect
            if (!isSelfDisconnecting.current) {
              handleDisconnect(true);
            }
@@ -153,16 +199,17 @@ export default function GhostPage() {
   };
 
   // --- RECEIVER LOGIC ---
-  const tuneFrequency = async () => {
-    if (!roomId) return;
-    setStatus(`Connecting to ${roomId}...`);
+  // Updated to accept an optional manualId for immediate scanning support
+  const tuneFrequency = async (manualId?: string) => {
+    const targetId = manualId || roomId;
+    if (!targetId) return;
     
-    // Reset flag on start
+    setStatus(`Connecting to ${targetId}...`);
     isSelfDisconnecting.current = false;
 
     try {
       await joinRoom(
-        roomId,
+        targetId,
         () => {
           setStatus("Secure Tunnel Established. Listening...");
           setIsConnected(true);
@@ -173,7 +220,6 @@ export default function GhostPage() {
           setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
         },
         () => {
-           // Receiver always shows modal if room dies while they are there
            if (!isSelfDisconnecting.current) {
                handleDisconnect(true);
            }
@@ -266,6 +312,50 @@ export default function GhostPage() {
     <div className="min-h-screen bg-neutral-950 text-neutral-200 font-sans p-6 md:p-12 selection:bg-indigo-500/30 relative">
       <canvas ref={canvasRef} className="hidden" />
 
+      {/* SCANNER MODAL */}
+      {isScanning && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in duration-300 p-4">
+          <div className="bg-neutral-900 border border-violet-500/30 w-full max-w-md rounded-2xl overflow-hidden shadow-2xl relative flex flex-col">
+             <div className="p-4 flex items-center justify-between border-b border-neutral-800 bg-neutral-950/50">
+               <h3 className="text-white font-medium flex items-center gap-2">
+                 <QrCode className="text-violet-500" /> Scan QR Code
+               </h3>
+               <button onClick={() => setIsScanning(false)} className="text-neutral-500 hover:text-white transition-colors">
+                 <X size={20} />
+               </button>
+             </div>
+             
+             {/* Scanner Area */}
+             <div className="relative bg-black h-[300px] flex items-center justify-center overflow-hidden">
+                <div id="reader" className="w-full h-full"></div>
+                {/* Visual Guide Overlay */}
+                <div className="absolute inset-0 border-2 border-violet-500/30 pointer-events-none"></div>
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 border-2 border-violet-500 rounded-lg shadow-[0_0_50px_rgba(139,92,246,0.3)] pointer-events-none"></div>
+             </div>
+
+             <div className="p-6 flex flex-col gap-3 bg-neutral-900">
+               <p className="text-center text-xs text-neutral-500 mb-2">Align the QR code within the frame to connect automatically.</p>
+               
+               <div className="relative">
+                 <input 
+                    type="file" 
+                    accept="image/*" 
+                    ref={fileInputRef} 
+                    onChange={handleScanFileUpload} 
+                    className="hidden" 
+                 />
+                 <button 
+                   onClick={() => fileInputRef.current?.click()}
+                   className="w-full bg-neutral-800 hover:bg-neutral-700 text-white font-medium py-3 rounded-xl transition-all flex items-center justify-center gap-2 border border-neutral-700"
+                 >
+                   <ImageIcon size={18} /> Upload from Gallery
+                 </button>
+               </div>
+             </div>
+          </div>
+        </div>
+      )}
+
       {/* CUSTOM DISCONNECT MODAL */}
       {showExitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
@@ -339,12 +429,10 @@ export default function GhostPage() {
               {/* --- SENDER UI --- */}
               {transferMode === "SEND" && (
                 <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl p-8 backdrop-blur-sm min-h-[600px] flex flex-col">
-                    {/* Header */}
                     <div className="flex items-center justify-between mb-6">
                         <button onClick={() => handleDisconnect(false)} className="flex items-center text-xs font-medium text-neutral-500 hover:text-white transition-colors"><ArrowLeft className="w-4 h-4 mr-1" /> Back</button>
                     </div>
 
-                    {/* PHASE 1: QR CODE (Broadcasting) */}
                     {!isConnected && (
                         <div className="flex-1 flex flex-col items-center justify-center space-y-8 animate-in fade-in">
                             <h2 className="text-2xl font-semibold text-white animate-pulse">Waiting for Receiver...</h2>
@@ -367,10 +455,8 @@ export default function GhostPage() {
                         </div>
                     )}
 
-                    {/* PHASE 2: BATCH TRANSFER (Connected) */}
                     {isConnected && (
                         <div className="flex-1 grid md:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4">
-                            {/* LEFT: File Manifest */}
                             <div className="bg-neutral-950/50 rounded-xl border border-neutral-800 p-4 flex flex-col">
                                 <div className="flex items-center justify-between mb-4 pb-2 border-b border-neutral-800">
                                     <h3 className="text-white font-medium flex items-center gap-2"><FileUp size={16}/> Selected Files</h3>
@@ -389,7 +475,6 @@ export default function GhostPage() {
                                 </div>
                             </div>
 
-                            {/* RIGHT: Drop Zone & Actions */}
                             <div className="flex flex-col gap-4">
                                 <div className="relative group flex-1">
                                     <input type="file" multiple onChange={handleQueueFiles} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
@@ -432,13 +517,11 @@ export default function GhostPage() {
               {/* --- RECEIVER UI --- */}
               {transferMode === "RECEIVE" && (
                   <div className="bg-neutral-900/30 border border-neutral-800 rounded-2xl p-8 backdrop-blur-sm max-w-xl mx-auto min-h-[500px] flex flex-col">
-                    {/* Header */}
                     <div className="flex items-center justify-between mb-8">
                         <button onClick={() => handleDisconnect(false)} className="flex items-center text-xs font-medium text-neutral-500 hover:text-white transition-colors"><ArrowLeft className="w-4 h-4 mr-1" /> Back</button>
                         <p className="text-violet-400 font-mono text-xs animate-pulse">{status}</p>
                     </div>
 
-                    {/* PHASE 1: ENTER CODE */}
                     {!isConnected ? (
                         <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-in fade-in">
                             <div className="text-center">
@@ -447,23 +530,32 @@ export default function GhostPage() {
                             </div>
                             
                             <div className="w-full space-y-4">
-                                <input 
-                                type="text" 
-                                placeholder="000 000" 
-                                onChange={(e) => setRoomId(e.target.value)} 
-                                value={roomId} 
-                                className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center text-2xl tracking-[0.5em] font-mono text-white focus:outline-none focus:border-violet-500 transition-all placeholder:text-neutral-800"
-                                />
+                                <div className="relative">
+                                  <input 
+                                    type="text" 
+                                    placeholder="000 000" 
+                                    onChange={(e) => setRoomId(e.target.value)} 
+                                    value={roomId} 
+                                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl p-4 text-center text-2xl tracking-[0.5em] font-mono text-white focus:outline-none focus:border-violet-500 transition-all placeholder:text-neutral-800"
+                                  />
+                                  <button 
+                                    onClick={() => setIsScanning(true)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-violet-400 transition-colors border border-neutral-700"
+                                    title="Scan QR Code"
+                                  >
+                                    <QrCode size={20} />
+                                  </button>
+                                </div>
+                                
                                 <button 
-                                onClick={tuneFrequency} 
-                                className="w-full bg-violet-600 hover:bg-violet-500 text-white font-medium py-4 rounded-xl transition-all shadow-lg shadow-violet-900/20 flex items-center justify-center gap-2"
+                                  onClick={() => tuneFrequency()} 
+                                  className="w-full bg-violet-600 hover:bg-violet-500 text-white font-medium py-4 rounded-xl transition-all shadow-lg shadow-violet-900/20 flex items-center justify-center gap-2"
                                 >
-                                <Zap className="w-4 h-4 fill-current" /> Connect to Tunnel
+                                  <Zap className="w-4 h-4 fill-current" /> Connect to Tunnel
                                 </button>
                             </div>
                         </div>
                     ) : (
-                        /* PHASE 2: FILE LIST (The Data Heist UI) */
                         <div className="flex-1 flex flex-col animate-in slide-in-from-bottom-4 duration-500">
                             <div className="flex items-center justify-between mb-4 pb-2 border-b border-neutral-800">
                                 <h3 className="text-white font-medium flex items-center gap-2"><Download className="text-emerald-500" size={18}/> Intercepted Data</h3>

@@ -11,6 +11,7 @@ import {
   Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck,
   AlertTriangle, X, Loader2, QrCode, Camera, Share2
 } from "lucide-react";
+import { useSearchParams } from "next/navigation"; // <--- ADD THIS
 
 export default function GhostPage() {
   const [activeTab, setActiveTab] = useState<"GHOST_DROP" | "STEGANOGRAPHY">("GHOST_DROP");
@@ -32,6 +33,19 @@ export default function GhostPage() {
   // Fix for Sender Popup (Tracks intentional disconnects)
   const isSelfDisconnecting = useRef(false);
 
+  // --- AUTO-START LOGIC ---
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    // Check if the URL has ?action=broadcast
+    const action = searchParams.get("action");
+
+    // If "broadcast" is requested and we are currently Idle, start immediately
+    if (action === "broadcast" && transferMode === "IDLE") {
+      startBroadcast();
+    }
+  }, [searchParams, transferMode]); // Runs once when page loads
+  
   // --- SCANNER / SHARE STATE ---
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);

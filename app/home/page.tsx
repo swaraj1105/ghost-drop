@@ -118,7 +118,14 @@ export default function LandingPage() {
           </Link>
           
           <button className="px-8 py-4 bg-neutral-900/50 border border-neutral-800 text-neutral-300 rounded-xl font-medium text-lg hover:bg-neutral-800 transition-all flex items-center justify-center gap-2 backdrop-blur-md">
-            <Terminal size={20} /> Documentation
+            <a 
+            href="https://github.com/swaraj1105/ghost-drop" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="px-8 py-4 bg-neutral-900/50 border border-neutral-800 text-neutral-300 rounded-xl font-medium text-lg hover:bg-neutral-800 transition-all flex items-center justify-center gap-2 backdrop-blur-md cursor-pointer"
+            >
+                <Terminal size={20} /> Documentation
+            </a>
           </button>
         </motion.div>
       </main>

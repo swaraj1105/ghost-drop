@@ -8,7 +8,7 @@ import {
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
   Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck,
-  AlertTriangle, X
+  AlertTriangle, X, Loader2
 } from "lucide-react";
 
 export default function GhostPage() {
@@ -23,8 +23,9 @@ export default function GhostPage() {
 
   // --- SENDER BATCH STATE ---
   const [fileQueue, setFileQueue] = useState<File[]>([]);
+  const [isSending, setIsSending] = useState(false); // <--- NEW LOADING STATE
 
-  // 🔴 NEW: Fix for Sender Popup (Tracks intentional disconnects)
+  // Fix for Sender Popup (Tracks intentional disconnects)
   const isSelfDisconnecting = useRef(false);
 
   const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
@@ -34,20 +35,29 @@ export default function GhostPage() {
   };
 
   const removeFile = (indexToRemove: number) => {
+    if (isSending) return; // Prevent removing while sending
     setFileQueue(prev => prev.filter((_, index) => index !== indexToRemove));
   };
 
   const sendBatch = async () => {
-    if (fileQueue.length === 0) return;
+    if (fileQueue.length === 0 || isSending) return;
     
-    for (let i = 0; i < fileQueue.length; i++) {
-      const file = fileQueue[i];
-      setStatus(`Streaming [${i + 1}/${fileQueue.length}]: ${file.name}...`);
-      await sendFile(file);
+    setIsSending(true); // Start loading state
+    
+    try {
+      for (let i = 0; i < fileQueue.length; i++) {
+        const file = fileQueue[i];
+        setStatus(`Streaming [${i + 1}/${fileQueue.length}]: ${file.name}...`);
+        await sendFile(file);
+      }
+      setStatus("All Transfers Complete.");
+      setFileQueue([]); 
+    } catch (error) {
+      console.error("Transfer failed", error);
+      setStatus("Transfer Interrupted.");
+    } finally {
+      setIsSending(false); // End loading state
     }
-    
-    setStatus("All Transfers Complete.");
-    setFileQueue([]); 
   };
 
   // --- UI STATE ---
@@ -81,7 +91,7 @@ export default function GhostPage() {
 
   // --- CLEANUP LOGIC ---
   const handleDisconnect = async (showModal = false) => {
-    // 🔴 Mark as intentional disconnect so we don't trigger our own popup
+    // Mark as intentional disconnect so we don't trigger our own popup
     if (!showModal) {
         isSelfDisconnecting.current = true;
     }
@@ -115,7 +125,7 @@ export default function GhostPage() {
     setTransferMode("SEND");
     setStatus("Generating Secure Frequency...");
     
-    // 🔴 Reset flag on start
+    // Reset flag on start
     isSelfDisconnecting.current = false;
 
     try {
@@ -126,7 +136,7 @@ export default function GhostPage() {
         },
         (blob, name) => console.log("Received back:", name),
         
-        // 🔴 FIXED CALLBACK: Logic runs correctly now
+        // Callback: Logic runs correctly now
         () => {
            // Only show modal if WE didn't cause the disconnect
            if (!isSelfDisconnecting.current) {
@@ -147,7 +157,7 @@ export default function GhostPage() {
     if (!roomId) return;
     setStatus(`Connecting to ${roomId}...`);
     
-    // 🔴 Reset flag on start
+    // Reset flag on start
     isSelfDisconnecting.current = false;
 
     try {
@@ -394,10 +404,24 @@ export default function GhostPage() {
 
                                 <button 
                                     onClick={sendBatch}
-                                    disabled={fileQueue.length === 0}
-                                    className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${fileQueue.length > 0 ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" : "bg-neutral-800 text-neutral-600 cursor-not-allowed"}`}
+                                    disabled={fileQueue.length === 0 || isSending}
+                                    className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${
+                                      fileQueue.length > 0 && !isSending
+                                        ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20" 
+                                        : "bg-neutral-800 text-neutral-500 cursor-not-allowed"
+                                    }`}
                                 >
-                                    <Zap size={18} /> SEND {fileQueue.length} FILES
+                                    {isSending ? (
+                                      <>
+                                        <Loader2 size={18} className="animate-spin" /> 
+                                        SENDING FILES...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Zap size={18} /> 
+                                        SEND {fileQueue.length} FILES
+                                      </>
+                                    )}
                                 </button>
                             </div>
                         </div>

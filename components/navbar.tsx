@@ -42,7 +42,7 @@ export function Navbar() {
       if (inputValue === "ghost") {
         // SUCCESS
         localStorage.setItem("ghost_token", "ACCESS_GRANTED")
-        router.push("/home") // <--- NEW DESTINATION (The Landing Page)
+        router.push("/uplink") // <--- NEW DESTINATION (The Landing Page)
         setShowModal(false)
       } else {
         // FAILURE

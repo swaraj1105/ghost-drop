@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, ChangeEvent, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { motion, useMotionTemplate, useMotionValue } from "framer-motion"; // <--- UI UPGRADE
+import { motion, useMotionTemplate, useMotionValue, AnimatePresence } from "framer-motion"; 
 import QRCode from "react-qr-code"; 
 import { Html5Qrcode } from "html5-qrcode";
 import { createRoom, joinRoom, sendFile, destroyRoom } from "@/lib/webrtcService";
@@ -10,8 +10,84 @@ import {
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
   Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck,
-  AlertTriangle, X, Loader2, QrCode, Share2, Ghost
+  AlertTriangle, X, Loader2, QrCode, Share2, Terminal, ScanLine
 } from "lucide-react";
+
+// --- 0. ANIMATION COMPONENTS (NEW) ---
+
+const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+[]{}|;:,.<>?";
+
+function ScrambleText({ text, className }: { text: string, className?: string }) {
+  const [displayText, setDisplayText] = useState("");
+  
+  useEffect(() => {
+    let iteration = 0;
+    let interval: NodeJS.Timeout;
+
+    if (text) {
+      interval = setInterval(() => {
+        setDisplayText(
+          text
+            .split("")
+            .map((char, index) => {
+              if (index < iteration) return text[index];
+              return CHARS[Math.floor(Math.random() * CHARS.length)];
+            })
+            .join("")
+        );
+
+        if (iteration >= text.length) {
+          clearInterval(interval);
+        }
+
+        iteration += 1 / 2; // Speed of reveal (higher denominator = slower)
+      }, 30);
+    } else {
+      setDisplayText("");
+    }
+
+    return () => clearInterval(interval);
+  }, [text]);
+
+  return <span className={className}>{displayText}</span>;
+}
+
+function ImageScanner({ isScanning }: { isScanning: boolean }) {
+  if (!isScanning) return null;
+
+  return (
+    <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden rounded-2xl">
+      {/* The Laser Line */}
+      <motion.div
+        initial={{ top: "-10%" }}
+        animate={{ top: "110%" }}
+        transition={{ 
+          duration: 2, 
+          ease: "linear", 
+          repeat: Infinity,
+          repeatDelay: 0.5 
+        }}
+        className="absolute left-0 right-0 h-1 bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.8)] z-20"
+      />
+      
+      {/* The Green Tint overlay trailing the laser */}
+      <motion.div 
+        initial={{ top: "-10%", opacity: 0 }}
+        animate={{ top: "110%", opacity: [0, 0.3, 0] }}
+        transition={{ 
+          duration: 2, 
+          ease: "linear", 
+          repeat: Infinity,
+          repeatDelay: 0.5 
+        }}
+        className="absolute left-0 right-0 h-24 bg-gradient-to-t from-emerald-500/30 to-transparent z-10"
+      />
+
+      {/* Grid Overlay */}
+      <div className="absolute inset-0 bg-[linear-gradient(rgba(16,185,129,0.1)_1px,transparent_1px),linear-gradient(90deg,rgba(16,185,129,0.1)_1px,transparent_1px)] bg-[size:20px_20px] opacity-20" />
+    </div>
+  );
+}
 
 // --- 1. MAIN LOGIC COMPONENT ---
 function GhostContent() {
@@ -19,7 +95,7 @@ function GhostContent() {
   const [activeTab, setActiveTab] = useState<"GHOST_DROP" | "STEGANOGRAPHY">("GHOST_DROP");
   const [transferMode, setTransferMode] = useState<"IDLE" | "SEND" | "RECEIVE">("IDLE");
 
-  // --- MOUSE SPOTLIGHT LOGIC (UI UPGRADE) ---
+  // --- MOUSE SPOTLIGHT LOGIC ---
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
 
@@ -54,7 +130,7 @@ function GhostContent() {
     }
   }, [searchParams]);
 
-  // --- LOGIC FUNCTIONS (Unchanged) ---
+  // --- LOGIC FUNCTIONS ---
   const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setFileQueue(prev => [...prev, ...Array.from(e.target.files!)]);
@@ -98,6 +174,7 @@ function GhostContent() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isImageScanning, setIsImageScanning] = useState(false); // NEW STATE FOR ANIMATION
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // --- HELPER FUNCTIONS ---
@@ -295,9 +372,22 @@ function GhostContent() {
     }
   };
 
-  const processSteganography = () => {
+  // --- UPDATED PROCESSING LOGIC WITH ANIMATION ---
+  const processSteganography = async () => {
     if (!selectedImage) return;
+    
+    // START ANIMATION
     setIsProcessing(true);
+    setDecodedMessage(""); // Clear previous
+
+    // If decoding, we wait for the scan effect
+    if (stegMode === "DECODE") {
+        setIsImageScanning(true);
+        // Wait 2 seconds for "scanning" effect
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        setIsImageScanning(false);
+    }
+
     const img = new Image();
     img.src = selectedImage;
     img.crossOrigin = "Anonymous";
@@ -338,7 +428,9 @@ function GhostContent() {
              link.download = "ghost_artifact.png";
              link.href = canvas.toDataURL("image/png");
              link.click();
+             setIsProcessing(false);
         } else {
+             // DECODE LOGIC
              let binaryMessage = "";
              let decoded = "";
              for (let i = 0; i < data.length; i += 4) {
@@ -352,8 +444,8 @@ function GhostContent() {
                  decoded += String.fromCharCode(parseInt(byte, 2));
              }
              setDecodedMessage(decoded);
+             setIsProcessing(false);
         }
-        setIsProcessing(false);
     };
   };
 
@@ -615,7 +707,7 @@ function GhostContent() {
             </motion.div>
           )}
 
-          {/* --- STEGANOGRAPHY TAB --- */}
+          {/* --- STEGANOGRAPHY TAB (UPGRADED) --- */}
           {activeTab === "STEGANOGRAPHY" && (
              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-neutral-900/40 border border-white/10 rounded-3xl overflow-hidden backdrop-blur-md">
                <div className="border-b border-white/5 px-6 py-4 flex gap-6">
@@ -624,36 +716,55 @@ function GhostContent() {
                </div>
                <div className="p-6 md:p-8 grid md:grid-cols-2 gap-12">
                  <div className="space-y-6">
+                   
+                   {/* IMAGE UPLOAD SECTION */}
                    <div className="space-y-3">
                      <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">{stegMode === "ENCODE" ? "1. Source Image" : "1. Encrypted Image"}</label>
                      <div className="relative group">
-                       <input type="file" accept="image/*" onChange={handleStegUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"/>
-                       <div className={`border border-dashed rounded-2xl p-8 text-center transition-all ${selectedImage ? "border-indigo-500/50 bg-indigo-500/5" : "border-white/10 bg-neutral-900/50 hover:bg-neutral-800/50"}`}>
-                         {selectedImage ? <div className="flex flex-col items-center gap-2"><ImageIcon className="w-8 h-8 text-indigo-400" /><span className="text-sm font-medium text-white">{fileName}</span></div> : <div className="flex flex-col items-center gap-2 text-neutral-500"><Upload className="w-8 h-8 mb-2" /><span className="text-sm font-medium">Drop image here</span></div>}
+                       <input type="file" accept="image/*" onChange={handleStegUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"/>
+                       <div className={`border border-dashed rounded-2xl p-8 text-center transition-all overflow-hidden relative ${selectedImage ? "border-indigo-500/50 bg-indigo-500/5" : "border-white/10 bg-neutral-900/50 hover:bg-neutral-800/50"}`}>
+                         
+                         {/* --- SCANNER OVERLAY --- */}
+                         <ImageScanner isScanning={isImageScanning} />
+                         
+                         {selectedImage ? <div className="flex flex-col items-center gap-2 relative z-10"><ImageIcon className="w-8 h-8 text-indigo-400" /><span className="text-sm font-medium text-white">{fileName}</span></div> : <div className="flex flex-col items-center gap-2 text-neutral-500 relative z-10"><Upload className="w-8 h-8 mb-2" /><span className="text-sm font-medium">Drop image here</span></div>}
                        </div>
                      </div>
                    </div>
+
                    {stegMode === "ENCODE" && (
                      <div className="space-y-3">
                        <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">2. Secret Payload</label>
                        <textarea value={secretMessage} onChange={(e) => setSecretMessage(e.target.value)} placeholder="Enter secret text..." className="w-full bg-neutral-900/50 border border-white/10 rounded-xl p-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 min-h-[120px]" />
                      </div>
                    )}
+                   
                    <button onClick={processSteganography} disabled={isProcessing || !selectedImage} className={`w-full py-3.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${isProcessing || !selectedImage ? "bg-neutral-800 text-neutral-500 cursor-not-allowed border border-white/5" : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg"}`}>
                      {isProcessing ? <Zap className="w-4 h-4 animate-spin" /> : stegMode === "ENCODE" ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                     {isProcessing ? "Processing..." : stegMode === "ENCODE" ? "ENCRYPT & DOWNLOAD" : "DECRYPT IMAGE"}
+                     {isProcessing ? "PROCESSING..." : stegMode === "ENCODE" ? "ENCRYPT & DOWNLOAD" : "DECRYPT IMAGE"}
                    </button>
                  </div>
+                 
+                 {/* RESULT DISPLAY */}
                  <div className="relative bg-neutral-950/50 rounded-2xl border border-white/5 p-6 flex flex-col items-center justify-center min-h-[300px]">
                    {decodedMessage ? (
                      <div className="w-full animate-in zoom-in-95 duration-300">
                        <div className="flex items-center justify-between mb-4">
-                         <div className="flex items-center gap-2 text-emerald-500"><CheckCircle2 className="w-5 h-5" /><span className="text-sm font-bold">DECODED MESSAGE</span></div>
+                         <div className="flex items-center gap-2 text-emerald-500"><ScanLine className="w-5 h-5" /><span className="text-sm font-bold">DECRYPTED DATA</span></div>
                        </div>
-                       <div className="bg-neutral-900 border border-white/10 rounded-xl p-6 shadow-2xl"><p className="text-white text-lg leading-relaxed font-mono">{decodedMessage}</p></div>
+                       <div className="bg-neutral-900 border border-emerald-500/30 rounded-xl p-6 shadow-[0_0_30px_rgba(16,185,129,0.1)] relative overflow-hidden">
+                          <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none" />
+                          <p className="text-emerald-400 text-lg leading-relaxed font-mono relative z-10">
+                              {/* --- SCRAMBLE TEXT EFFECT --- */}
+                              <ScrambleText text={decodedMessage} />
+                          </p>
+                       </div>
                      </div>
                    ) : (
-                     <div className="text-center opacity-40 max-w-xs"><ShieldCheck className="w-16 h-16 text-neutral-500 mx-auto mb-4" /><p className="text-sm text-neutral-500">Result will appear here.</p></div>
+                     <div className="text-center opacity-40 max-w-xs">
+                        <Terminal className="w-16 h-16 text-neutral-500 mx-auto mb-4" />
+                        <p className="text-sm text-neutral-500">Awaiting decryption sequence...</p>
+                     </div>
                    )}
                  </div>
                </div>

@@ -10,20 +10,20 @@ export default function UplinkPage() {
   const [status, setStatus] = useState("Initializing Handshake...");
   const [progress, setProgress] = useState(0);
 
-  // Auto-redirect logic
+// Auto-redirect logic
   useEffect(() => {
-    // 1. Progress Bar Simulation
+    // 1. Progress Bar Simulation (Keep existing code...)
     const timer = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 100) {
           clearInterval(timer);
           return 100;
         }
-        return prev + Math.floor(Math.random() * 10) + 1; // Random jump
+        return prev + Math.floor(Math.random() * 10) + 1; 
       });
     }, 150);
 
-    // 2. Status Text Updates
+    // 2. Status Text Updates (Keep existing code...)
     const timeouts = [
       setTimeout(() => setStatus("Bypassing Firewall..."), 800),
       setTimeout(() => setStatus("Encrypting Tunnel (AES-256)..."), 1600),
@@ -31,9 +31,9 @@ export default function UplinkPage() {
       setTimeout(() => setStatus("ACCESS GRANTED"), 3200),
     ];
 
-    // 3. Final Redirect
+    // 3. FINAL REDIRECT - THE FIX
     const redirect = setTimeout(() => {
-      router.push("/home");
+      router.replace("/home"); // <--- CHANGED FROM push() TO replace()
     }, 3500);
 
     return () => {

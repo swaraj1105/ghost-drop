@@ -25,22 +25,30 @@ function ScrambleText({ text, className }: { text: string, className?: string })
     let interval: NodeJS.Timeout;
 
     if (text) {
+      // ADAPTIVE SPEED MATH:
+      // We want the whole animation to take roughly 1.5 seconds (1500ms).
+      // Running at 30ms intervals means we have ~50 frames total.
+      // So we calculate how many characters to reveal per frame.
+      const step = Math.max(1, text.length / 50); 
+
       interval = setInterval(() => {
         setDisplayText(
           text
             .split("")
             .map((char, index) => {
-              if (index < iteration) return text[index];
-              return CHARS[Math.floor(Math.random() * CHARS.length)];
+              if (index < iteration) return text[index]; // Revealed part
+              if (char === " ") return " "; // Keep spaces clean
+              return CHARS[Math.floor(Math.random() * CHARS.length)]; // Scramble part
             })
             .join("")
         );
 
         if (iteration >= text.length) {
           clearInterval(interval);
+          setDisplayText(text); // Ensure final state is clean
         }
 
-        iteration += 1 / 2; // Speed of reveal (higher denominator = slower)
+        iteration += step; // Use the calculated adaptive step
       }, 30);
     } else {
       setDisplayText("");

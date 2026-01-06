@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, ChangeEvent, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { motion, useMotionTemplate, useMotionValue, AnimatePresence } from "framer-motion"; 
+import { motion, useMotionTemplate, useMotionValue } from "framer-motion"; 
 import QRCode from "react-qr-code"; 
 import { Html5Qrcode } from "html5-qrcode";
 import { createRoom, joinRoom, sendFile, destroyRoom } from "@/lib/webrtcService";
@@ -10,7 +10,7 @@ import {
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
   Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck,
-  AlertTriangle, X, Loader2, QrCode, Share2, Terminal, ScanLine
+  AlertTriangle, X, Loader2, QrCode, Share2, Terminal, ScanLine, Sparkles, RefreshCw
 } from "lucide-react";
 
 // --- 0. ANIMATION COMPONENTS ---
@@ -25,11 +25,7 @@ function ScrambleText({ text, className }: { text: string, className?: string })
     let interval: NodeJS.Timeout;
 
     if (text) {
-      // ADAPTIVE SPEED MATH:
-      // We want the whole animation to take roughly 1.5 seconds (1500ms).
-      // Running at 30ms intervals means we have ~50 frames total.
       const step = Math.max(1, text.length / 50); 
-
       interval = setInterval(() => {
         setDisplayText(
           text
@@ -46,13 +42,11 @@ function ScrambleText({ text, className }: { text: string, className?: string })
           clearInterval(interval);
           setDisplayText(text);
         }
-
         iteration += step;
       }, 30);
     } else {
       setDisplayText("");
     }
-
     return () => clearInterval(interval);
   }, [text]);
 
@@ -124,6 +118,40 @@ function GhostContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrRef = useRef<HTMLDivElement>(null); 
 
+  // --- UI STATE (ALL VARIABLES DEFINED) ---
+  const [isCopied, setIsCopied] = useState(false);
+  const [showExitModal, setShowExitModal] = useState(false);
+  const [isDecodedCopied, setIsDecodedCopied] = useState(false);
+
+  // --- STEGANOGRAPHY STATE ---
+  const [stegMode, setStegMode] = useState<"ENCODE" | "DECODE">("ENCODE");
+  const [imageSource, setImageSource] = useState<"UPLOAD" | "GENERATE">("UPLOAD");
+  const [secretMessage, setSecretMessage] = useState("");
+  const [decodedMessage, setDecodedMessage] = useState("");
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string>("");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isImageScanning, setIsImageScanning] = useState(false);
+  
+  // AI GENERATOR STATE
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // --- CYBERPUNK PROMPTS ---
+  const CYBER_PROMPTS = [
+    "Cyberpunk city street at night, neon rain, blade runner style",
+    "Abstract digital data stream, matrix code background, green and black",
+    "Futuristic hacker workspace, multiple screens, dark atmosphere",
+    "Circuit board patterns, glowing blue energy lines, 8k resolution",
+    "Glitch art portrait, anonymous silhouette, digital noise"
+  ];
+
+  const randomizePrompt = () => {
+    const random = CYBER_PROMPTS[Math.floor(Math.random() * CYBER_PROMPTS.length)];
+    setAiPrompt(random);
+  };
+
   // --- AUTO-START LOGIC ---
   useEffect(() => {
     const action = searchParams.get("action");
@@ -132,7 +160,106 @@ function GhostContent() {
     }
   }, [searchParams]);
 
-  // --- LOGIC FUNCTIONS ---
+  // --- HELPER FUNCTIONS ---
+  const copyToClipboard = () => {
+    if (!roomId) return;
+    navigator.clipboard.writeText(roomId);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const copyDecodedText = () => {
+    if (!decodedMessage) return;
+    navigator.clipboard.writeText(decodedMessage);
+    setIsDecodedCopied(true);
+    setTimeout(() => setIsDecodedCopied(false), 2000);
+  };
+
+// --- ULTIMATE HYBRID GENERATION (Pollinations -> HF -> Offline) ---
+  const generateAiImage = async () => {
+    if (!aiPrompt) return;
+    setIsGenerating(true);
+    setSelectedImage(null);
+
+    try {
+        console.log("Requesting Secure AI Generation...");
+        
+        // 1. Call your Smart Backend (Handles Pollinations + Hugging Face)
+        const response = await fetch("/api/generate-image", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: aiPrompt }),
+        });
+
+        if (!response.ok) throw new Error("AI Services Unavailable");
+
+        const blob = await response.blob();
+        await processAndSetImage(blob, `secure_ai_${Date.now()}.png`);
+
+    } catch (err) {
+        // 2. OFFLINE FALLBACK (The Ultimate Safety Net)
+        console.warn("Internet/API Error. Switching to Offline Entropy Mode.");
+        alert("Network unreachable. Switching to Secure Offline Mode.");
+        
+        const canvas = document.createElement("canvas");
+        canvas.width = 800;
+        canvas.height = 600;
+        const ctx = canvas.getContext("2d");
+        
+        if (ctx) {
+            // Generate pure random static (Digital Noise)
+            const imageData = ctx.createImageData(800, 600);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const val = Math.floor(Math.random() * 255);
+                data[i] = val; data[i+1] = val; data[i+2] = val; data[i+3] = 255;
+            }
+            ctx.putImageData(imageData, 0, 0);
+            
+            canvas.toBlob((offlineBlob) => {
+                if (offlineBlob) {
+                    processAndSetImage(offlineBlob, `offline_static_${Date.now()}.png`);
+                }
+            });
+        }
+    } finally {
+        setIsGenerating(false);
+    }
+  };
+
+  // --- REUSABLE PROCESSOR (Injects Noise & Updates State) ---
+  const processAndSetImage = async (blob: Blob, name: string) => {
+      const imgBitmap = await createImageBitmap(blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = imgBitmap.width;
+      canvas.height = imgBitmap.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.drawImage(imgBitmap, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      // Salt the image (Security Step)
+      for (let i = 0; i < data.length; i += 4) {
+          data[i] = Math.min(255, Math.max(0, data[i] + (Math.random() - 0.5) * 6));
+          data[i+1] = Math.min(255, Math.max(0, data[i+1] + (Math.random() - 0.5) * 6));
+          data[i+2] = Math.min(255, Math.max(0, data[i+2] + (Math.random() - 0.5) * 6));
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      
+      canvas.toBlob((finalBlob) => {
+          if (finalBlob) {
+              const objectUrl = URL.createObjectURL(finalBlob);
+              setSelectedImage(objectUrl);
+              setFileName(name);
+              setImageSource("UPLOAD");
+          }
+      }, 'image/png');
+  };
+
+  // --- WEBRTC & FILE HANDLING ---
   const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setFileQueue(prev => [...prev, ...Array.from(e.target.files!)]);
@@ -165,35 +292,106 @@ function GhostContent() {
     }
   };
 
-  // --- UI STATE ---
-  const [isCopied, setIsCopied] = useState(false);
-  const [showExitModal, setShowExitModal] = useState(false);
-
-  // --- STEGANOGRAPHY STATE ---
-  const [stegMode, setStegMode] = useState<"ENCODE" | "DECODE">("ENCODE");
-  const [secretMessage, setSecretMessage] = useState("");
-  const [decodedMessage, setDecodedMessage] = useState("");
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string>("");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isImageScanning, setIsImageScanning] = useState(false);
-  const [isDecodedCopied, setIsDecodedCopied] = useState(false); // NEW STATE FOR DECODED TEXT
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // --- HELPER FUNCTIONS ---
-  const copyToClipboard = () => {
-    if (!roomId) return;
-    navigator.clipboard.writeText(roomId);
-    setIsCopied(true);
-    setTimeout(() => setIsCopied(false), 2000);
+  const handleDisconnect = async (showModal = false) => {
+    if (!showModal) isSelfDisconnecting.current = true;
+    if (roomId) {
+      await destroyRoom(roomId);
+      setRoomId("");
+    }
+    setStatus("Idle");
+    setIsConnected(false);
+    setReceivedFiles([]); 
+    setFileQueue([]);     
+    setTransferMode("IDLE");
+    if (showModal) setShowExitModal(true);
   };
 
-  const copyDecodedText = () => {
-    if (!decodedMessage) return;
-    navigator.clipboard.writeText(decodedMessage);
-    setIsDecodedCopied(true);
-    setTimeout(() => setIsDecodedCopied(false), 2000);
+  const startBroadcast = async () => {
+    setTransferMode("SEND");
+    setStatus("Generating Secure Frequency...");
+    isSelfDisconnecting.current = false;
+    try {
+      const id = await createRoom(
+        () => {
+          setStatus("Peer Connected. Tunnel Open.");
+          setIsConnected(true);
+        },
+        (blob, name) => console.log("Received back:", name),
+        () => { if (!isSelfDisconnecting.current) handleDisconnect(true); }
+      );
+      setRoomId(id);
+      setStatus("Waiting for Receiver...");
+    } catch (e) {
+      setStatus("Connection Error");
+    }
   };
+
+  // --- SCANNER LOGIC (RESTORED & FIXED) ---
+  const tuneFrequency = async (manualId?: string) => {
+    const targetId = manualId || roomId;
+    if (!targetId) return;
+    setStatus(`Connecting to ${targetId}...`);
+    isSelfDisconnecting.current = false;
+    try {
+      await joinRoom(
+        targetId,
+        () => {
+          setStatus("Secure Tunnel Established. Listening...");
+          setIsConnected(true);
+        },
+        (blob, fileName) => {
+          setStatus("Data Fragment Received.");
+          const url = URL.createObjectURL(blob);
+          setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
+        },
+        () => { if (!isSelfDisconnecting.current) handleDisconnect(true); }
+      );
+    } catch (err) {
+      alert("Invalid Room ID or Room no longer exists.");
+      setStatus("Connection Failed");
+    }
+  };
+
+  const handleScanSuccess = (decodedText: string) => {
+    setIsScanning(false);
+    setRoomId(decodedText);
+    tuneFrequency(decodedText);
+  };
+
+  // RESTORED: This function is required for "Upload from Gallery" in the Scanner Modal
+  const handleScanFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const html5QrCode = new Html5Qrcode("reader");
+    try {
+      const result = await html5QrCode.scanFile(file, true);
+      handleScanSuccess(result);
+    } catch (err) {
+      alert("Could not find a valid QR code in this image.");
+    }
+  };
+
+  useEffect(() => {
+    if (isScanning && transferMode === "RECEIVE") {
+      const html5QrCode = new Html5Qrcode("reader");
+      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+      html5QrCode.start(
+        { facingMode: "environment" }, 
+        config, 
+        (decodedText) => {
+          handleScanSuccess(decodedText);
+          html5QrCode.stop().catch(err => console.error(err));
+        },
+        () => {}
+      ).catch(err => console.error("Error starting scanner", err));
+
+      return () => {
+        if(html5QrCode.isScanning) {
+            html5QrCode.stop().catch(err => console.error("Stop failed", err));
+        }
+      };
+    }
+  }, [isScanning]);
 
   const handleShare = async () => {
     if (!roomId) return;
@@ -249,126 +447,16 @@ function GhostContent() {
           copyToClipboard();
       }
   };
-
+  
   const downloadFile = (file: {name: string, data: string}) => {
     const link = document.createElement("a");
     link.href = file.data;
     link.download = file.name;
     link.click();
   };
-
-  const handleDisconnect = async (showModal = false) => {
-    if (!showModal) isSelfDisconnecting.current = true;
-    if (roomId) {
-      await destroyRoom(roomId);
-      setRoomId("");
-    }
-    setStatus("Idle");
-    setIsConnected(false);
-    setReceivedFiles([]); 
-    setFileQueue([]);     
-    setTransferMode("IDLE");
-    if (showModal) setShowExitModal(true);
-  };
-
-  useEffect(() => {
-    const handleTabClose = () => { if (roomId) destroyRoom(roomId); };
-    window.addEventListener("beforeunload", handleTabClose);
-    return () => {
-      window.removeEventListener("beforeunload", handleTabClose);
-      if (roomId) destroyRoom(roomId);
-    };
-  }, [roomId]);
-
-  useEffect(() => {
-    if (isScanning && transferMode === "RECEIVE") {
-      const html5QrCode = new Html5Qrcode("reader");
-      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-      html5QrCode.start(
-        { facingMode: "environment" }, 
-        config, 
-        (decodedText) => {
-          handleScanSuccess(decodedText);
-          html5QrCode.stop().catch(err => console.error(err));
-        },
-        () => {}
-      ).catch(err => console.error("Error starting scanner", err));
-
-      return () => {
-        if(html5QrCode.isScanning) {
-            html5QrCode.stop().catch(err => console.error("Stop failed", err));
-        }
-      };
-    }
-  }, [isScanning]);
-
-  const handleScanSuccess = (decodedText: string) => {
-    setIsScanning(false);
-    setRoomId(decodedText);
-    tuneFrequency(decodedText);
-  };
-
-  const handleScanFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const html5QrCode = new Html5Qrcode("reader");
-    try {
-      const result = await html5QrCode.scanFile(file, true);
-      handleScanSuccess(result);
-    } catch (err) {
-      alert("Could not find a valid QR code in this image.");
-    }
-  };
-
-  const startBroadcast = async () => {
-    setTransferMode("SEND");
-    setStatus("Generating Secure Frequency...");
-    isSelfDisconnecting.current = false;
-    try {
-      const id = await createRoom(
-        () => {
-          setStatus("Peer Connected. Tunnel Open.");
-          setIsConnected(true);
-        },
-        (blob, name) => console.log("Received back:", name),
-        () => {
-           if (!isSelfDisconnecting.current) handleDisconnect(true);
-        }
-      );
-      setRoomId(id);
-      setStatus("Waiting for Receiver...");
-    } catch (e) {
-      setStatus("Connection Error");
-    }
-  };
-
-  const tuneFrequency = async (manualId?: string) => {
-    const targetId = manualId || roomId;
-    if (!targetId) return;
-    setStatus(`Connecting to ${targetId}...`);
-    isSelfDisconnecting.current = false;
-    try {
-      await joinRoom(
-        targetId,
-        () => {
-          setStatus("Secure Tunnel Established. Listening...");
-          setIsConnected(true);
-        },
-        (blob, fileName) => {
-          setStatus("Data Fragment Received.");
-          const url = URL.createObjectURL(blob);
-          setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
-        },
-        () => {
-           if (!isSelfDisconnecting.current) handleDisconnect(true);
-        }
-      );
-    } catch (err) {
-      alert("Invalid Room ID or Room no longer exists.");
-      setStatus("Connection Failed");
-    }
-  };
-
+  
+  // --- STEGANOGRAPHY PROCESSING (WITH XOR ENCRYPTION) ---
+  
   const handleStegUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -382,9 +470,21 @@ function GhostContent() {
     }
   };
 
+  // Simple XOR Encryption/Decryption
+  const xorEncrypt = (text: string, key: string) => {
+    let result = "";
+    for (let i = 0; i < text.length; i++) {
+      result += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    }
+    return result;
+  };
+
   const processSteganography = async () => {
     if (!selectedImage) return;
     
+    // Default Key (In a real app, you'd let user type this)
+    const ENCRYPTION_KEY = "GHOST_PROTOCOL_V1";
+
     setIsProcessing(true);
     setDecodedMessage("");
 
@@ -395,61 +495,95 @@ function GhostContent() {
     }
 
     const img = new Image();
+    img.crossOrigin = "Anonymous"; 
     img.src = selectedImage;
-    img.crossOrigin = "Anonymous";
+
+    img.onerror = () => {
+        alert("Failed to load image for processing. Please try a different image.");
+        setIsProcessing(false);
+    };
+
     img.onload = () => {
         const canvas = canvasRef.current;
-        if (!canvas) return;
+        if (!canvas) { setIsProcessing(false); return; }
         const ctx = canvas.getContext("2d");
-        if (!ctx) return;
+        if (!ctx) { setIsProcessing(false); return; }
+
         canvas.width = img.width;
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
+        
+        try {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
 
-        if (stegMode === "ENCODE") {
-             let binaryMessage = "";
-             for (let i = 0; i < secretMessage.length; i++) {
-                 binaryMessage += secretMessage.charCodeAt(i).toString(2).padStart(8, "0");
-             }
-             binaryMessage += "00000000"; 
-             if (binaryMessage.length > (data.length / 4) * 3) {
-                 alert("Message too long");
-                 setIsProcessing(false);
-                 return;
-             }
-             let bitIndex = 0;
-             for (let i = 0; i < data.length; i += 4) {
-                 if (bitIndex >= binaryMessage.length) break;
-                 for (let j = 0; j < 3; j++) {
-                     if (bitIndex < binaryMessage.length) {
-                         data[i + j] = (data[i + j] & 254) | parseInt(binaryMessage[bitIndex]);
-                         bitIndex++;
+            if (stegMode === "ENCODE") {
+                 // 1. Encrypt Payload
+                 const encryptedMsg = xorEncrypt(secretMessage, ENCRYPTION_KEY);
+                 const payload = encryptedMsg + "|EOF|";
+
+                 let binaryMessage = "";
+                 for (let i = 0; i < payload.length; i++) {
+                     binaryMessage += payload.charCodeAt(i).toString(2).padStart(8, "0");
+                 }
+                 
+                 if (binaryMessage.length > (data.length / 4) * 3) {
+                     alert("Message is too long for this image size.");
+                     setIsProcessing(false);
+                     return;
+                 }
+
+                 let bitIndex = 0;
+                 for (let i = 0; i < data.length; i += 4) {
+                     if (bitIndex >= binaryMessage.length) break;
+                     for (let j = 0; j < 3; j++) {
+                         if (bitIndex < binaryMessage.length) {
+                             data[i + j] = (data[i + j] & 254) | parseInt(binaryMessage[bitIndex]);
+                             bitIndex++;
+                         }
                      }
                  }
-             }
-             ctx.putImageData(imageData, 0, 0);
-             const link = document.createElement("a");
-             link.download = "ghost_artifact.png";
-             link.href = canvas.toDataURL("image/png");
-             link.click();
-             setIsProcessing(false);
-        } else {
-             let binaryMessage = "";
-             let decoded = "";
-             for (let i = 0; i < data.length; i += 4) {
-                 for (let j = 0; j < 3; j++) {
-                     binaryMessage += (data[i + j] & 1).toString();
+                 ctx.putImageData(imageData, 0, 0);
+                 const link = document.createElement("a");
+                 link.download = "secure_artifact.png";
+                 link.href = canvas.toDataURL("image/png");
+                 link.click();
+             } else {
+                 // DECODE MODE
+                 let binaryMessage = "";
+                 let rawText = "";
+                 
+                 for (let i = 0; i < data.length; i += 4) {
+                     for (let j = 0; j < 3; j++) {
+                         binaryMessage += (data[i + j] & 1).toString();
+                     }
+                 }
+
+                 for (let i = 0; i < binaryMessage.length; i += 8) {
+                     const byte = binaryMessage.slice(i, i + 8);
+                     const char = String.fromCharCode(parseInt(byte, 2));
+                     rawText += char;
+                     if (rawText.endsWith("|EOF|")) {
+                         rawText = rawText.slice(0, -5);
+                         break;
+                     }
+                 }
+
+                 // 2. Decrypt Payload
+                 const finalMessage = xorEncrypt(rawText, ENCRYPTION_KEY);
+                 
+                 // Basic heuristic to check if decryption yielded valid text
+                 if (/[\x00-\x08\x0E-\x1F]/.test(finalMessage)) {
+                     setDecodedMessage("⚠️ Error: No valid GhostDrop signature found.");
+                 } else {
+                     setDecodedMessage(finalMessage);
                  }
              }
-             for (let i = 0; i < binaryMessage.length; i += 8) {
-                 const byte = binaryMessage.slice(i, i + 8);
-                 if (byte === "00000000") break;
-                 decoded += String.fromCharCode(parseInt(byte, 2));
-             }
-             setDecodedMessage(decoded);
-             setIsProcessing(false);
+        } catch (e) {
+            console.error(e);
+            alert("Error processing image. The image format might not be supported.");
+        } finally {
+            setIsProcessing(false);
         }
     };
   };
@@ -501,6 +635,7 @@ function GhostContent() {
                  >
                    <ImageIcon size={18} /> Upload from Gallery
                </button>
+               {/* FIXED: Correct Function Reference */}
                <input type="file" accept="image/*" ref={fileInputRef} onChange={handleScanFileUpload} className="hidden" />
              </div>
           </div>
@@ -562,6 +697,8 @@ function GhostContent() {
         </div>
 
         <main className="transition-all duration-300 ease-in-out">
+          
+          {/* --- GHOSTDROP TAB --- */}
           {activeTab === "GHOST_DROP" && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
               {transferMode === "IDLE" && (
@@ -712,38 +849,95 @@ function GhostContent() {
             </motion.div>
           )}
 
-          {/* --- STEGANOGRAPHY TAB (UPGRADED) --- */}
+          {/* --- STEGANOGRAPHY TAB --- */}
           {activeTab === "STEGANOGRAPHY" && (
              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-neutral-900/40 border border-white/10 rounded-3xl overflow-hidden backdrop-blur-md">
                <div className="border-b border-white/5 px-6 py-4 flex gap-6">
                  <button onClick={() => { setStegMode("ENCODE"); setSelectedImage(null); setFileName("") }} className={`text-sm font-bold transition-colors ${stegMode === "ENCODE" ? "text-indigo-400" : "text-neutral-500 hover:text-white"}`}>ENCODE (HIDE)</button>
                  <button onClick={() => { setStegMode("DECODE"); setSelectedImage(null); setFileName("") }} className={`text-sm font-bold transition-colors ${stegMode === "DECODE" ? "text-indigo-400" : "text-neutral-500 hover:text-white"}`}>DECODE (REVEAL)</button>
                </div>
+               
                <div className="p-6 md:p-8 grid md:grid-cols-2 gap-12">
                  <div className="space-y-6">
                    
-                   {/* IMAGE UPLOAD SECTION */}
+                   {/* 1. SOURCE SELECTION TOGGLE */}
+                   {stegMode === "ENCODE" && (
+                      <div className="flex gap-2 p-1 bg-black/40 rounded-lg w-fit border border-white/5">
+                          <button 
+                            onClick={() => setImageSource("UPLOAD")}
+                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all ${imageSource === "UPLOAD" ? "bg-neutral-700 text-white" : "text-neutral-500 hover:text-neutral-300"}`}
+                          >
+                            UPLOAD FILE
+                          </button>
+                          <button 
+                            onClick={() => setImageSource("GENERATE")}
+                            className={`px-3 py-1.5 text-xs font-bold rounded-md transition-all flex items-center gap-1 ${imageSource === "GENERATE" ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/20" : "text-neutral-500 hover:text-neutral-300"}`}
+                          >
+                            <Sparkles size={12} /> AI GENERATE
+                          </button>
+                      </div>
+                   )}
+
+                   {/* 2. IMAGE INPUT AREA */}
                    <div className="space-y-3">
-                     <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">{stegMode === "ENCODE" ? "1. Source Image" : "1. Encrypted Image"}</label>
-                     <div className="relative group">
-                       <input type="file" accept="image/*" onChange={handleStegUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"/>
-                       <div className={`border border-dashed rounded-2xl p-8 text-center transition-all overflow-hidden relative ${selectedImage ? "border-indigo-500/50 bg-indigo-500/5" : "border-white/10 bg-neutral-900/50 hover:bg-neutral-800/50"}`}>
-                         
-                         {/* --- SCANNER OVERLAY --- */}
-                         <ImageScanner isScanning={isImageScanning} />
-                         
-                         {selectedImage ? <div className="flex flex-col items-center gap-2 relative z-10"><ImageIcon className="w-8 h-8 text-indigo-400" /><span className="text-sm font-medium text-white">{fileName}</span></div> : <div className="flex flex-col items-center gap-2 text-neutral-500 relative z-10"><Upload className="w-8 h-8 mb-2" /><span className="text-sm font-medium">Drop image here</span></div>}
-                       </div>
-                     </div>
+                     <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">{stegMode === "ENCODE" ? "Source Image" : "Encrypted Image"}</label>
+                     
+                     {/* OPTION A: UPLOAD */}
+                     {(imageSource === "UPLOAD" || stegMode === "DECODE") && (
+                        <div className="relative group h-48">
+                            <input type="file" accept="image/*" onChange={handleStegUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20"/>
+                            <div className={`border border-dashed rounded-2xl h-full flex items-center justify-center text-center transition-all overflow-hidden relative ${selectedImage ? "border-indigo-500/50 bg-indigo-500/5" : "border-white/10 bg-neutral-900/50 hover:bg-neutral-800/50"}`}>
+                                <ImageScanner isScanning={isImageScanning} />
+                                {selectedImage ? (
+                                    <div className="flex flex-col items-center gap-2 relative z-10">
+                                        <img src={selectedImage} className="h-24 w-auto rounded-lg object-contain opacity-80" />
+                                        <span className="text-xs font-medium text-white bg-black/50 px-2 py-1 rounded">{fileName}</span>
+                                    </div> 
+                                ) : (
+                                    <div className="flex flex-col items-center gap-2 text-neutral-500 relative z-10">
+                                        <Upload className="w-8 h-8 mb-2" /><span className="text-sm font-medium">Drop image here</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                     )}
+
+                     {/* OPTION B: AI GENERATE */}
+                     {stegMode === "ENCODE" && imageSource === "GENERATE" && (
+                         <div className="bg-neutral-900/50 border border-white/10 rounded-2xl p-4 space-y-3 h-48 flex flex-col justify-center">
+                            <div className="relative">
+                                <input 
+                                    type="text" 
+                                    value={aiPrompt}
+                                    onChange={(e) => setAiPrompt(e.target.value)}
+                                    placeholder="Enter prompt (e.g. Cyberpunk City)..."
+                                    className="w-full bg-black/50 border border-white/10 rounded-lg p-3 pr-10 text-sm text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                                />
+                                <button onClick={randomizePrompt} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-indigo-400 transition-colors" title="Randomize Prompt">
+                                    <RefreshCw size={14} />
+                                </button>
+                            </div>
+                            <button 
+                                onClick={generateAiImage}
+                                disabled={isGenerating || !aiPrompt}
+                                className={`w-full py-2 rounded-lg font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 ${isGenerating ? "bg-neutral-800 text-neutral-500" : "bg-indigo-600 hover:bg-indigo-500 text-white"}`}
+                            >
+                                {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                                {isGenerating ? "Generating..." : "Generate Cover Image"}
+                            </button>
+                         </div>
+                     )}
                    </div>
 
+                   {/* 3. SECRET PAYLOAD INPUT */}
                    {stegMode === "ENCODE" && (
                      <div className="space-y-3">
-                       <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">2. Secret Payload</label>
+                       <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Secret Payload</label>
                        <textarea value={secretMessage} onChange={(e) => setSecretMessage(e.target.value)} placeholder="Enter secret text..." className="w-full bg-neutral-900/50 border border-white/10 rounded-xl p-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 min-h-[120px]" />
                      </div>
                    )}
                    
+                   {/* ACTION BUTTON */}
                    <button onClick={processSteganography} disabled={isProcessing || !selectedImage} className={`w-full py-3.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${isProcessing || !selectedImage ? "bg-neutral-800 text-neutral-500 cursor-not-allowed border border-white/5" : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg"}`}>
                      {isProcessing ? <Zap className="w-4 h-4 animate-spin" /> : stegMode === "ENCODE" ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                      {isProcessing ? "PROCESSING..." : stegMode === "ENCODE" ? "ENCRYPT & DOWNLOAD" : "DECRYPT IMAGE"}
@@ -757,18 +951,10 @@ function GhostContent() {
                        <div className="flex items-center justify-between mb-4">
                          <div className="flex items-center gap-2 text-emerald-500"><ScanLine className="w-5 h-5" /><span className="text-sm font-bold">DECRYPTED DATA</span></div>
                        </div>
-                       
-                       {/* --- DECRYPTED BOX WITH COPY BUTTON --- */}
                        <div className="bg-neutral-900 border border-emerald-500/30 rounded-xl p-6 shadow-[0_0_30px_rgba(16,185,129,0.1)] relative overflow-hidden group/code">
-                          {/* THE NEW COPY BUTTON */}
-                          <button
-                            onClick={copyDecodedText}
-                            className="absolute top-3 right-3 p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-lg transition-colors z-20 opacity-0 group-hover/code:opacity-100"
-                            title="Copy to clipboard"
-                          >
+                          <button onClick={copyDecodedText} className="absolute top-3 right-3 p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-lg transition-colors z-20 opacity-0 group-hover/code:opacity-100">
                              {isDecodedCopied ? <Check size={16} /> : <Copy size={16} />}
                           </button>
-
                           <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none" />
                           <p className="text-emerald-400 text-lg leading-relaxed font-mono relative z-10 break-words">
                               <ScrambleText text={decodedMessage} />

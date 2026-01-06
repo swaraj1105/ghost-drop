@@ -13,7 +13,7 @@ import {
   AlertTriangle, X, Loader2, QrCode, Share2, Terminal, ScanLine
 } from "lucide-react";
 
-// --- 0. ANIMATION COMPONENTS (NEW) ---
+// --- 0. ANIMATION COMPONENTS ---
 
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+[]{}|;:,.<>?";
 
@@ -28,7 +28,6 @@ function ScrambleText({ text, className }: { text: string, className?: string })
       // ADAPTIVE SPEED MATH:
       // We want the whole animation to take roughly 1.5 seconds (1500ms).
       // Running at 30ms intervals means we have ~50 frames total.
-      // So we calculate how many characters to reveal per frame.
       const step = Math.max(1, text.length / 50); 
 
       interval = setInterval(() => {
@@ -36,19 +35,19 @@ function ScrambleText({ text, className }: { text: string, className?: string })
           text
             .split("")
             .map((char, index) => {
-              if (index < iteration) return text[index]; // Revealed part
-              if (char === " ") return " "; // Keep spaces clean
-              return CHARS[Math.floor(Math.random() * CHARS.length)]; // Scramble part
+              if (index < iteration) return text[index];
+              if (char === " ") return " ";
+              return CHARS[Math.floor(Math.random() * CHARS.length)];
             })
             .join("")
         );
 
         if (iteration >= text.length) {
           clearInterval(interval);
-          setDisplayText(text); // Ensure final state is clean
+          setDisplayText(text);
         }
 
-        iteration += step; // Use the calculated adaptive step
+        iteration += step;
       }, 30);
     } else {
       setDisplayText("");
@@ -65,7 +64,6 @@ function ImageScanner({ isScanning }: { isScanning: boolean }) {
 
   return (
     <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden rounded-2xl">
-      {/* The Laser Line */}
       <motion.div
         initial={{ top: "-10%" }}
         animate={{ top: "110%" }}
@@ -77,8 +75,6 @@ function ImageScanner({ isScanning }: { isScanning: boolean }) {
         }}
         className="absolute left-0 right-0 h-1 bg-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.8)] z-20"
       />
-      
-      {/* The Green Tint overlay trailing the laser */}
       <motion.div 
         initial={{ top: "-10%", opacity: 0 }}
         animate={{ top: "110%", opacity: [0, 0.3, 0] }}
@@ -90,8 +86,6 @@ function ImageScanner({ isScanning }: { isScanning: boolean }) {
         }}
         className="absolute left-0 right-0 h-24 bg-gradient-to-t from-emerald-500/30 to-transparent z-10"
       />
-
-      {/* Grid Overlay */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(16,185,129,0.1)_1px,transparent_1px),linear-gradient(90deg,rgba(16,185,129,0.1)_1px,transparent_1px)] bg-[size:20px_20px] opacity-20" />
     </div>
   );
@@ -182,7 +176,8 @@ function GhostContent() {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isImageScanning, setIsImageScanning] = useState(false); // NEW STATE FOR ANIMATION
+  const [isImageScanning, setIsImageScanning] = useState(false);
+  const [isDecodedCopied, setIsDecodedCopied] = useState(false); // NEW STATE FOR DECODED TEXT
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // --- HELPER FUNCTIONS ---
@@ -191,6 +186,13 @@ function GhostContent() {
     navigator.clipboard.writeText(roomId);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const copyDecodedText = () => {
+    if (!decodedMessage) return;
+    navigator.clipboard.writeText(decodedMessage);
+    setIsDecodedCopied(true);
+    setTimeout(() => setIsDecodedCopied(false), 2000);
   };
 
   const handleShare = async () => {
@@ -380,18 +382,14 @@ function GhostContent() {
     }
   };
 
-  // --- UPDATED PROCESSING LOGIC WITH ANIMATION ---
   const processSteganography = async () => {
     if (!selectedImage) return;
     
-    // START ANIMATION
     setIsProcessing(true);
-    setDecodedMessage(""); // Clear previous
+    setDecodedMessage("");
 
-    // If decoding, we wait for the scan effect
     if (stegMode === "DECODE") {
         setIsImageScanning(true);
-        // Wait 2 seconds for "scanning" effect
         await new Promise(resolve => setTimeout(resolve, 2000));
         setIsImageScanning(false);
     }
@@ -438,7 +436,6 @@ function GhostContent() {
              link.click();
              setIsProcessing(false);
         } else {
-             // DECODE LOGIC
              let binaryMessage = "";
              let decoded = "";
              for (let i = 0; i < data.length; i += 4) {
@@ -760,10 +757,20 @@ function GhostContent() {
                        <div className="flex items-center justify-between mb-4">
                          <div className="flex items-center gap-2 text-emerald-500"><ScanLine className="w-5 h-5" /><span className="text-sm font-bold">DECRYPTED DATA</span></div>
                        </div>
-                       <div className="bg-neutral-900 border border-emerald-500/30 rounded-xl p-6 shadow-[0_0_30px_rgba(16,185,129,0.1)] relative overflow-hidden">
+                       
+                       {/* --- DECRYPTED BOX WITH COPY BUTTON --- */}
+                       <div className="bg-neutral-900 border border-emerald-500/30 rounded-xl p-6 shadow-[0_0_30px_rgba(16,185,129,0.1)] relative overflow-hidden group/code">
+                          {/* THE NEW COPY BUTTON */}
+                          <button
+                            onClick={copyDecodedText}
+                            className="absolute top-3 right-3 p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-lg transition-colors z-20 opacity-0 group-hover/code:opacity-100"
+                            title="Copy to clipboard"
+                          >
+                             {isDecodedCopied ? <Check size={16} /> : <Copy size={16} />}
+                          </button>
+
                           <div className="absolute inset-0 bg-emerald-500/5 pointer-events-none" />
-                          <p className="text-emerald-400 text-lg leading-relaxed font-mono relative z-10">
-                              {/* --- SCRAMBLE TEXT EFFECT --- */}
+                          <p className="text-emerald-400 text-lg leading-relaxed font-mono relative z-10 break-words">
                               <ScrambleText text={decodedMessage} />
                           </p>
                        </div>

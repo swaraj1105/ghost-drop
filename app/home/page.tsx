@@ -92,7 +92,7 @@ function Navbar() {
 }
 
 // ============================================================
-// GHOST HERO COMPONENT (FIXED LAYOUT)
+// GHOST HERO COMPONENT (MOBILE LAYOUT FIX)
 // ============================================================
 function GhostHero() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -108,41 +108,43 @@ function GhostHero() {
 
   return (
     <section ref={containerRef} className="relative min-h-[150vh] flex flex-col items-center justify-start">
-      {/* 1. Added 'flex-col' to the sticky container 
-         2. This ensures children stack vertically instead of overlapping
-      */}
-      <div className="sticky top-0 h-screen w-full flex flex-col items-center justify-center overflow-hidden">
+      <div className="sticky top-0 h-screen w-full flex flex-col items-center overflow-hidden">
         
         {/* Grid background */}
         <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:60px_60px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_40%,transparent_100%)]" />
 
-        {/* Massive GHOST text */}
-        <motion.div
-          className="relative z-10 flex flex-col items-center"
-          style={{ filter: blur, opacity, scale }}
-        >
-          <motion.h1 className="text-[20vw] md:text-[18vw] font-black leading-none text-glow select-none">
-            GHOST
-          </motion.h1>
-          
-          <motion.p className="text-neutral-500 text-lg md:text-xl tracking-[0.3em] uppercase mt-4">
-            Leave No Trace
-          </motion.p>
-        </motion.div>
+        {/* 1. TEXT CONTAINER 
+            Using 'flex-1' makes this expand to fill all empty space.
+            'justify-center' keeps the GHOST text perfectly in the middle of that space.
+        */}
+        <div className="flex-1 w-full flex flex-col items-center justify-center relative z-10 p-6">
+          <motion.div
+            className="flex flex-col items-center"
+            style={{ filter: blur, opacity, scale }}
+          >
+            <motion.h1 className="text-[20vw] md:text-[18vw] font-black leading-none text-glow select-none">
+              GHOST
+            </motion.h1>
+            
+            <motion.p className="text-neutral-500 text-sm md:text-xl tracking-[0.3em] uppercase mt-4 text-center">
+              Leave No Trace
+            </motion.p>
+          </motion.div>
+        </div>
 
-        {/* Main Button - RELATIVE POSITIONING
-           Removed 'absolute bottom-32' and added 'mt-16' 
-           This forces the button to always sit 16 units below the text.
+        {/* 2. BUTTON CONTAINER
+            This sits naturally at the bottom because the text container above pushed it down.
+            'pb-32' adds the breathing room you see in your mobile screenshot.
         */}
         <motion.div
-          className="z-50 flex flex-col items-center gap-6 mt-16" 
+          className="relative z-50 flex flex-col items-center gap-6 pb-32 md:pb-20" 
           initial={{ opacity: 1, y: 0 }}
         >
           <Link href="/dashboard/ghost?action=broadcast">
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.98 }}
-              className="group relative px-12 py-5 bg-white text-black rounded-full font-bold text-xl overflow-hidden glow-indigo cursor-pointer"
+              className="group relative px-12 py-5 bg-white text-black rounded-full font-bold text-xl overflow-hidden glow-indigo cursor-pointer shadow-2xl shadow-indigo-500/20"
             >
               <span className="absolute inset-0 bg-gradient-to-r from-transparent via-black/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
               <span className="relative flex items-center gap-3">

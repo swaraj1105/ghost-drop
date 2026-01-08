@@ -38,10 +38,18 @@ let receivedBytes = 0;
 export const createRoom = async (
   onChannelOpen: () => void, 
   onFileReceived: (blob: Blob, name: string) => void,
-  onRoomDestroyed: () => void // <--- NEW CALLBACK
+  onRoomDestroyed: () => void 
 ) => {
   if (pc) pc.close();
   pc = new RTCPeerConnection(servers);
+
+  // --- NEW: Handle "Rude" Disconnections (Browser Close/Refresh) ---
+  pc.oniceconnectionstatechange = () => {
+    if (pc && (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed")) {
+        console.warn("Peer connection lost (ICE failure).");
+        onRoomDestroyed();
+    }
+  };
 
   dataChannel = pc.createDataChannel("ghost-drop");
   setupChannel(dataChannel, onChannelOpen, onFileReceived);
@@ -71,7 +79,7 @@ export const createRoom = async (
     });
   });
 
-  // 🔴 NEW: Watch if the room gets destroyed (by Receiver)
+  // Watch if the room gets destroyed (by Receiver via Firebase)
   onValue(roomRef, (snapshot) => {
     if (!snapshot.exists()) {
        onRoomDestroyed();
@@ -80,6 +88,7 @@ export const createRoom = async (
 
   return roomId;
 };
+
 /**
  * 2. RECEIVER: Joins a Room
  */
@@ -87,7 +96,7 @@ export const joinRoom = async (
   roomId: string, 
   onChannelOpen: () => void, 
   onFileReceived: (blob: Blob, name: string) => void,
-  onRoomDestroyed: () => void // <--- NEW CALLBACK
+  onRoomDestroyed: () => void 
 ) => {
   const roomRef = ref(db, `rooms/${roomId}`);
   const roomSnapshot = await get(roomRef);
@@ -95,6 +104,14 @@ export const joinRoom = async (
 
   if (pc) pc.close();
   pc = new RTCPeerConnection(servers);
+
+  // --- NEW: Handle "Rude" Disconnections (Browser Close/Refresh) ---
+  pc.oniceconnectionstatechange = () => {
+    if (pc && (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed")) {
+        console.warn("Host connection lost (ICE failure).");
+        onRoomDestroyed();
+    }
+  };
 
   pc.ondatachannel = (e) => {
     dataChannel = e.channel;
@@ -117,9 +134,8 @@ export const joinRoom = async (
     });
   });
 
-  // 🔴 NEW: Watch for Room Destruction
+  // Watch for Room Destruction (via Firebase)
   onValue(roomRef, (snapshot) => {
-    // If snapshot becomes null/doesn't exist, the Sender deleted the room
     if (!snapshot.exists()) {
        onRoomDestroyed();
     }
@@ -175,6 +191,7 @@ export const sendFile = async (file: File) => {
     const slice = file.slice(offset, offset + CHUNK_SIZE);
     const buffer = await slice.arrayBuffer();
     
+    // Backpressure control: Don't flood the channel
     if (dataChannel.bufferedAmount > 16 * 1024 * 1024) {
         await new Promise(r => setTimeout(r, 100));
     }
@@ -190,6 +207,7 @@ export const sendFile = async (file: File) => {
 export const destroyRoom = async (roomId: string) => {
   if (!roomId) return;
   
+  // Close local connections immediately
   if (pc) {
     pc.close();
     pc = null;
@@ -199,7 +217,12 @@ export const destroyRoom = async (roomId: string) => {
     dataChannel = null;
   }
 
+  // Remove room from Firebase (triggers onRoomDestroyed for the other peer)
   const roomRef = ref(db, `rooms/${roomId}`);
-  await remove(roomRef);
-  console.log(`💥 Room ${roomId} destroyed.`);
+  try {
+      await remove(roomRef);
+      console.log(`💥 Room ${roomId} destroyed.`);
+  } catch (e) {
+      console.warn("Room already deleted or network error");
+  }
 };

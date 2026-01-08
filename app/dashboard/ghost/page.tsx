@@ -13,7 +13,6 @@ import {
   AlertTriangle, X, Loader2, QrCode, Share2, Terminal, ScanLine, Sparkles, RefreshCw
 } from "lucide-react";
 
-// import MatrixRain from "@/components/MatrixRain"; // Adjust path if needed
 // --- 0. ANIMATION COMPONENTS ---
 
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+[]{}|;:,.<>?";
@@ -160,6 +159,20 @@ function GhostContent() {
       setTimeout(() => startBroadcast(), 100);
     }
   }, [searchParams]);
+
+  // --- FIX: HANDLE BROWSER REFRESH/CLOSE (Tab Close Logic) ---
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // Notify app we are disconnecting voluntarily so we don't show the error modal to ourselves
+      isSelfDisconnecting.current = true;
+      if (roomId) {
+        destroyRoom(roomId);
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [roomId]);
+
 
   // --- HELPER FUNCTIONS ---
   const copyToClipboard = () => {
@@ -318,7 +331,10 @@ function GhostContent() {
           setIsConnected(true);
         },
         (blob, name) => console.log("Received back:", name),
-        () => { if (!isSelfDisconnecting.current) handleDisconnect(true); }
+        () => { 
+            console.log("Receiver disconnected.");
+            if (!isSelfDisconnecting.current) handleDisconnect(true); 
+        }
       );
       setRoomId(id);
       setStatus("Waiting for Receiver...");
@@ -345,7 +361,10 @@ function GhostContent() {
           const url = URL.createObjectURL(blob);
           setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
         },
-        () => { if (!isSelfDisconnecting.current) handleDisconnect(true); }
+        () => { 
+            console.log("Host disconnected.");
+            if (!isSelfDisconnecting.current) handleDisconnect(true); 
+        }
       );
     } catch (err) {
       alert("Invalid Room ID or Room no longer exists.");
@@ -798,20 +817,18 @@ function GhostContent() {
               {/* --- RECEIVER UI --- */}
               {transferMode === "RECEIVE" && (
                   <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-neutral-900/40 border border-white/10 rounded-3xl p-8 backdrop-blur-md max-w-xl mx-auto min-h-[500px] flex flex-col relative overflow-hidden">
+                    {/* FIXED: Mobile Stacked Layout, Desktop Row Layout */}
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 relative z-10">
-    {/* Terminate Button */}
-    <button 
-        onClick={() => handleDisconnect(false)} 
-        className="self-start flex items-center text-xs font-bold text-neutral-500 hover:text-white transition-colors uppercase tracking-wider"
-    >
-        <ArrowLeft className="w-4 h-4 mr-1" /> Terminate
-    </button>
-    
-    {/* Status Text (Now pushes to new line on mobile if needed) */}
-    <p className="text-violet-400 font-mono text-xs animate-pulse break-words text-left md:text-right">
-        {status}
-    </p>
-</div>
+                        <button 
+                            onClick={() => handleDisconnect(false)} 
+                            className="self-start flex items-center text-xs font-bold text-neutral-500 hover:text-white transition-colors uppercase tracking-wider"
+                        >
+                            <ArrowLeft className="w-4 h-4 mr-1" /> Terminate
+                        </button>
+                        <p className="text-violet-400 font-mono text-xs animate-pulse break-words text-left md:text-right">
+                            {status}
+                        </p>
+                    </div>
 
                     {!isConnected ? (
                         <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-in fade-in relative z-10">
@@ -822,7 +839,14 @@ function GhostContent() {
                             
                             <div className="w-full space-y-4">
                                 <div className="relative">
-                                  <input type="text" placeholder="000 000" onChange={(e) => setRoomId(e.target.value)} value={roomId} className="w-full bg-neutral-950/80 border border-white/10 rounded-xl p-4 text-center text-2xl tracking-[0.5em] font-mono text-white focus:outline-none focus:border-violet-500 transition-all placeholder:text-neutral-800" />
+                                  {/* REVERTED: Original Box Input */}
+                                  <input 
+                                    type="text" 
+                                    placeholder="000 000" 
+                                    onChange={(e) => setRoomId(e.target.value)} 
+                                    value={roomId} 
+                                    className="w-full bg-neutral-950/80 border border-white/10 rounded-xl p-4 text-center text-2xl tracking-[0.5em] font-mono text-white focus:outline-none focus:border-violet-500 transition-all placeholder:text-neutral-800" 
+                                   />
                                   <button onClick={() => setIsScanning(true)} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-violet-400 transition-colors border border-white/10"><QrCode size={20} /></button>
                                 </div>
                                 <button onClick={() => tuneFrequency()} className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-violet-900/20 flex items-center justify-center gap-2"><Zap className="w-4 h-4 fill-current" /> ESTABLISH LINK</button>
@@ -848,7 +872,7 @@ function GhostContent() {
                                             <div className="w-10 h-10 bg-neutral-800 rounded-lg flex items-center justify-center text-emerald-500 group-hover:bg-emerald-500/10 transition-colors"><CheckCircle2 size={20} /></div>
                                             <div className="flex flex-col overflow-hidden">
                                                 <span className="text-sm text-white font-medium truncate w-full">{file.name}</span>
-                                                <span className="text-[10px] text-emerald-500/70 uppercase tracking-wider">Received</span>
+                                                <span className="text-xs text-emerald-500/70 uppercase tracking-wider">Received</span>
                                             </div>
                                         </div>
                                         <button onClick={() => downloadFile(file)} className="p-2 bg-white text-black rounded-lg hover:bg-emerald-400 transition-colors shadow-lg"><Download size={18} /></button>
@@ -919,6 +943,7 @@ function GhostContent() {
                      {stegMode === "ENCODE" && imageSource === "GENERATE" && (
                          <div className="bg-neutral-900/50 border border-white/10 rounded-2xl p-4 space-y-3 h-48 flex flex-col justify-center">
                             <div className="relative">
+                                {/* REVERTED: Original Box Input */}
                                 <input 
                                     type="text" 
                                     value={aiPrompt}
@@ -946,7 +971,13 @@ function GhostContent() {
                    {stegMode === "ENCODE" && (
                      <div className="space-y-3">
                        <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Secret Payload</label>
-                       <textarea value={secretMessage} onChange={(e) => setSecretMessage(e.target.value)} placeholder="Enter secret text..." className="w-full bg-neutral-900/50 border border-white/10 rounded-xl p-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 min-h-[120px]" />
+                       {/* REVERTED: Original Box Input */}
+                       <textarea 
+                           value={secretMessage} 
+                           onChange={(e) => setSecretMessage(e.target.value)} 
+                           placeholder="Enter secret text..." 
+                           className="w-full bg-neutral-900/50 border border-white/10 rounded-xl p-4 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 min-h-[120px]" 
+                       />
                      </div>
                    )}
                    

@@ -92,7 +92,7 @@ function Navbar() {
 }
 
 // ============================================================
-// GHOST HERO COMPONENT (MOBILE LAYOUT FIX)
+// GHOST HERO COMPONENT (BACKLIT / HALO EFFECT)
 // ============================================================
 function GhostHero() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -113,29 +113,34 @@ function GhostHero() {
         {/* Grid background */}
         <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:60px_60px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_40%,transparent_100%)]" />
 
-        {/* 1. TEXT CONTAINER 
-            Using 'flex-1' makes this expand to fill all empty space.
-            'justify-center' keeps the GHOST text perfectly in the middle of that space.
-        */}
+        {/* 1. TEXT CONTAINER */}
         <div className="flex-1 w-full flex flex-col items-center justify-center relative z-10 p-6">
           <motion.div
-            className="flex flex-col items-center"
+            className="flex flex-col items-center relative" // Added 'relative' here
             style={{ filter: blur, opacity, scale }}
           >
-            <motion.h1 className="text-[20vw] md:text-[18vw] font-black leading-none text-glow select-none">
+            {/* --- THE BACKLIGHT LAYER --- */}
+            {/* This is a blurred copy sitting behind the main text */}
+            <span 
+              className="absolute inset-0 z-0 text-[20vw] md:text-[18vw] font-black leading-none text-white/60 blur-[40px] select-none"
+              aria-hidden="true"
+            >
+              GHOST
+            </span>
+
+            {/* --- THE SHARP FRONT LAYER --- */}
+            {/* Solid white, sharp edges, sitting on top (z-10) */}
+            <motion.h1 className="relative z-10 text-[20vw] md:text-[18vw] font-black leading-none text-white select-none">
               GHOST
             </motion.h1>
             
-            <motion.p className="text-neutral-500 text-sm md:text-xl tracking-[0.3em] uppercase mt-4 text-center">
+            <motion.p className="text-neutral-500 text-sm md:text-xl tracking-[0.3em] uppercase mt-4 text-center relative z-20">
               Leave No Trace
             </motion.p>
           </motion.div>
         </div>
 
-        {/* 2. BUTTON CONTAINER
-            This sits naturally at the bottom because the text container above pushed it down.
-            'pb-32' adds the breathing room you see in your mobile screenshot.
-        */}
+        {/* 2. BUTTON CONTAINER */}
         <motion.div
           className="relative z-50 flex flex-col items-center gap-6 pb-32 md:pb-20" 
           initial={{ opacity: 1, y: 0 }}
@@ -471,7 +476,7 @@ function GhostFooter() {
 }
 
 // ============================================================
-// REQUIRED CSS STYLES
+// REQUIRED CSS STYLES (UPDATED GLOW)
 // ============================================================
 const CSS_STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
@@ -509,8 +514,12 @@ body {
               0 0 80px -10px rgba(16, 185, 129, 0.4);
 }
 
+/* UPDATED: Hyper-Intense White Bloom */
 .text-glow {
-  text-shadow: 0 0 80px rgba(255, 255, 255, 0.3),
-               0 0 40px rgba(255, 255, 255, 0.2);
+  text-shadow: 
+    0 0 15px rgba(255, 255, 255, 0.8),  /* Tight core */
+    0 0 30px rgba(255, 255, 255, 0.6),  /* Mid range */
+    0 0 60px rgba(255, 255, 255, 0.4),  /* Soft bloom */
+    0 0 100px rgba(255, 255, 255, 0.2); /* Wide ambience */
 }
 `;

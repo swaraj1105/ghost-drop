@@ -14,7 +14,6 @@ import {
 } from "lucide-react";
 
 // --- 0. ANIMATION COMPONENTS ---
-
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+[]{}|;:,.<>?";
 
 function ScrambleText({ text, className }: { text: string, className?: string }) {
@@ -118,7 +117,7 @@ function GhostContent() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const qrRef = useRef<HTMLDivElement>(null); 
 
-  // --- UI STATE (ALL VARIABLES DEFINED) ---
+  // --- UI STATE ---
   const [isCopied, setIsCopied] = useState(false);
   const [showExitModal, setShowExitModal] = useState(false);
   const [isDecodedCopied, setIsDecodedCopied] = useState(false);
@@ -160,10 +159,9 @@ function GhostContent() {
     }
   }, [searchParams]);
 
-  // --- FIX: HANDLE BROWSER REFRESH/CLOSE (Tab Close Logic) ---
+  // --- 2. HANDLE BROWSER REFRESH/CLOSE ---
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // Notify app we are disconnecting voluntarily so we don't show the error modal to ourselves
       isSelfDisconnecting.current = true;
       if (roomId) {
         destroyRoom(roomId);
@@ -174,7 +172,46 @@ function GhostContent() {
   }, [roomId]);
 
 
-  // --- HELPER FUNCTIONS ---
+  // --- HELPER: DISCONNECT LOGIC ---
+  const handleDisconnect = async (showModal = false) => {
+    if (!showModal) isSelfDisconnecting.current = true;
+    if (roomId) {
+      await destroyRoom(roomId);
+      setRoomId("");
+    }
+    setStatus("Idle");
+    setIsConnected(false);
+    setReceivedFiles([]); 
+    setFileQueue([]);     
+    setTransferMode("IDLE");
+    if (showModal) setShowExitModal(true);
+  };
+
+  // --- 3. SOFT BACK BUTTON (Intercepts Back Navigation) ---
+  useEffect(() => {
+    // Only trap history if we are in an active mode
+    if (transferMode === "SEND" || transferMode === "RECEIVE") {
+      // 1. Push a "trap" state to history
+      window.history.pushState({ ghostMode: true }, "", window.location.href);
+
+      // 2. Listen for when user hits Back
+      const handlePopState = (event: PopStateEvent) => {
+        // The browser has already 'popped' the state (gone back)
+        // We just need to ensure we don't leave the page, but reset UI
+        event.preventDefault(); 
+        handleDisconnect(false); // Clean disconnect, no error modal
+      };
+
+      window.addEventListener("popstate", handlePopState);
+
+      return () => {
+        window.removeEventListener("popstate", handlePopState);
+      };
+    }
+  }, [transferMode]);
+
+
+  // --- REST OF HELPER FUNCTIONS ---
   const copyToClipboard = () => {
     if (!roomId) return;
     navigator.clipboard.writeText(roomId);
@@ -189,7 +226,7 @@ function GhostContent() {
     setTimeout(() => setIsDecodedCopied(false), 2000);
   };
 
-// --- ULTIMATE HYBRID GENERATION (Pollinations -> HF -> Offline) ---
+  // --- AI GENERATOR ---
   const generateAiImage = async () => {
     if (!aiPrompt) return;
     setIsGenerating(true);
@@ -198,7 +235,6 @@ function GhostContent() {
     try {
         console.log("Requesting Secure AI Generation...");
         
-        // 1. Call your Smart Backend (Handles Pollinations + Hugging Face)
         const response = await fetch("/api/generate-image", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -211,7 +247,6 @@ function GhostContent() {
         await processAndSetImage(blob, `secure_ai_${Date.now()}.png`);
 
     } catch (err) {
-        // 2. OFFLINE FALLBACK (The Ultimate Safety Net)
         console.warn("Internet/API Error. Switching to Offline Entropy Mode.");
         alert("Network unreachable. Switching to Secure Offline Mode.");
         
@@ -221,7 +256,6 @@ function GhostContent() {
         const ctx = canvas.getContext("2d");
         
         if (ctx) {
-            // Generate pure random static (Digital Noise)
             const imageData = ctx.createImageData(800, 600);
             const data = imageData.data;
             for (let i = 0; i < data.length; i += 4) {
@@ -241,7 +275,7 @@ function GhostContent() {
     }
   };
 
-  // --- REUSABLE PROCESSOR (Injects Noise & Updates State) ---
+  // --- REUSABLE PROCESSOR ---
   const processAndSetImage = async (blob: Blob, name: string) => {
       const imgBitmap = await createImageBitmap(blob);
       const canvas = document.createElement('canvas');
@@ -254,7 +288,6 @@ function GhostContent() {
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imageData.data;
 
-      // Salt the image (Security Step)
       for (let i = 0; i < data.length; i += 4) {
           data[i] = Math.min(255, Math.max(0, data[i] + (Math.random() - 0.5) * 6));
           data[i+1] = Math.min(255, Math.max(0, data[i+1] + (Math.random() - 0.5) * 6));
@@ -273,7 +306,7 @@ function GhostContent() {
       }, 'image/png');
   };
 
-  // --- WEBRTC & FILE HANDLING ---
+  // --- WEBRTC ACTIONS ---
   const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setFileQueue(prev => [...prev, ...Array.from(e.target.files!)]);
@@ -306,20 +339,6 @@ function GhostContent() {
     }
   };
 
-  const handleDisconnect = async (showModal = false) => {
-    if (!showModal) isSelfDisconnecting.current = true;
-    if (roomId) {
-      await destroyRoom(roomId);
-      setRoomId("");
-    }
-    setStatus("Idle");
-    setIsConnected(false);
-    setReceivedFiles([]); 
-    setFileQueue([]);     
-    setTransferMode("IDLE");
-    if (showModal) setShowExitModal(true);
-  };
-
   const startBroadcast = async () => {
     setTransferMode("SEND");
     setStatus("Generating Secure Frequency...");
@@ -343,7 +362,6 @@ function GhostContent() {
     }
   };
 
-  // --- SCANNER LOGIC (RESTORED & FIXED) ---
   const tuneFrequency = async (manualId?: string) => {
     const targetId = manualId || roomId;
     if (!targetId) return;
@@ -378,7 +396,6 @@ function GhostContent() {
     tuneFrequency(decodedText);
   };
 
-  // RESTORED: This function is required for "Upload from Gallery" in the Scanner Modal
   const handleScanFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -475,8 +492,7 @@ function GhostContent() {
     link.click();
   };
   
-  // --- STEGANOGRAPHY PROCESSING (WITH XOR ENCRYPTION) ---
-  
+  // --- STEGANOGRAPHY LOGIC ---
   const handleStegUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -490,7 +506,6 @@ function GhostContent() {
     }
   };
 
-  // Simple XOR Encryption/Decryption
   const xorEncrypt = (text: string, key: string) => {
     let result = "";
     for (let i = 0; i < text.length; i++) {
@@ -501,8 +516,6 @@ function GhostContent() {
 
   const processSteganography = async () => {
     if (!selectedImage) return;
-    
-    // Default Key (In a real app, you'd let user type this)
     const ENCRYPTION_KEY = "GHOST_PROTOCOL_V1";
 
     setIsProcessing(true);
@@ -538,7 +551,6 @@ function GhostContent() {
             const data = imageData.data;
 
             if (stegMode === "ENCODE") {
-                 // 1. Encrypt Payload
                  const encryptedMsg = xorEncrypt(secretMessage, ENCRYPTION_KEY);
                  const payload = encryptedMsg + "|EOF|";
 
@@ -569,7 +581,6 @@ function GhostContent() {
                  link.href = canvas.toDataURL("image/png");
                  link.click();
              } else {
-                 // DECODE MODE
                  let binaryMessage = "";
                  let rawText = "";
                  
@@ -589,10 +600,7 @@ function GhostContent() {
                      }
                  }
 
-                 // 2. Decrypt Payload
                  const finalMessage = xorEncrypt(rawText, ENCRYPTION_KEY);
-                 
-                 // Basic heuristic to check if decryption yielded valid text
                  if (/[\x00-\x08\x0E-\x1F]/.test(finalMessage)) {
                      setDecodedMessage("⚠️ Error: No valid GhostDrop signature found.");
                  } else {
@@ -615,7 +623,6 @@ function GhostContent() {
       onMouseMove={handleMouseMove}
     >
 
-      {/* <MatrixRain /> */}
       <canvas ref={canvasRef} className="hidden" />
 
       {/* --- BACKGROUND EFFECTS --- */}
@@ -657,7 +664,6 @@ function GhostContent() {
                  >
                    <ImageIcon size={18} /> Upload from Gallery
                </button>
-               {/* FIXED: Correct Function Reference */}
                <input type="file" accept="image/*" ref={fileInputRef} onChange={handleScanFileUpload} className="hidden" />
              </div>
           </div>
@@ -839,7 +845,6 @@ function GhostContent() {
                             
                             <div className="w-full space-y-4">
                                 <div className="relative">
-                                  {/* REVERTED: Original Box Input */}
                                   <input 
                                     type="text" 
                                     placeholder="000 000" 

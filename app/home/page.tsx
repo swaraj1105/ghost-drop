@@ -92,7 +92,7 @@ function Navbar() {
 }
 
 // ============================================================
-// GHOST HERO COMPONENT (UPDATED)
+// GHOST HERO COMPONENT (FIXED LAYOUT)
 // ============================================================
 function GhostHero() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -108,14 +108,17 @@ function GhostHero() {
 
   return (
     <section ref={containerRef} className="relative min-h-[150vh] flex flex-col items-center justify-start">
-      <div className="sticky top-0 h-screen w-full flex items-center justify-center overflow-hidden">
+      {/* 1. Added 'flex-col' to the sticky container 
+         2. This ensures children stack vertically instead of overlapping
+      */}
+      <div className="sticky top-0 h-screen w-full flex flex-col items-center justify-center overflow-hidden">
         
         {/* Grid background */}
         <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:60px_60px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_40%,transparent_100%)]" />
 
         {/* Massive GHOST text */}
         <motion.div
-          className="relative z-10 flex flex-col items-center mb-20"
+          className="relative z-10 flex flex-col items-center"
           style={{ filter: blur, opacity, scale }}
         >
           <motion.h1 className="text-[20vw] md:text-[18vw] font-black leading-none text-glow select-none">
@@ -127,12 +130,14 @@ function GhostHero() {
           </motion.p>
         </motion.div>
 
-        {/* Main Button - FIXED LINK & TEXT */}
+        {/* Main Button - RELATIVE POSITIONING
+           Removed 'absolute bottom-32' and added 'mt-16' 
+           This forces the button to always sit 16 units below the text.
+        */}
         <motion.div
-          className="absolute bottom-32 z-50 flex flex-col items-center gap-6" 
+          className="z-50 flex flex-col items-center gap-6 mt-16" 
           initial={{ opacity: 1, y: 0 }}
         >
-          {/* UPDATED HREF: ?action=broadcast triggers Sender Mode */}
           <Link href="/dashboard/ghost?action=broadcast">
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -155,7 +160,6 @@ function GhostHero() {
     </section>
   );
 }
-
 // ============================================================
 // PARALLAX STATS COMPONENT
 // ============================================================

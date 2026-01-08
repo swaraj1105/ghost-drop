@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 // --- 0. ANIMATION COMPONENTS ---
+
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+[]{}|;:,.<>?";
 
 function ScrambleText({ text, className }: { text: string, className?: string }) {
@@ -189,15 +190,10 @@ function GhostContent() {
 
   // --- 3. SOFT BACK BUTTON (Intercepts Back Navigation) ---
   useEffect(() => {
-    // Only trap history if we are in an active mode
     if (transferMode === "SEND" || transferMode === "RECEIVE") {
-      // 1. Push a "trap" state to history
       window.history.pushState({ ghostMode: true }, "", window.location.href);
 
-      // 2. Listen for when user hits Back
       const handlePopState = (event: PopStateEvent) => {
-        // The browser has already 'popped' the state (gone back)
-        // We just need to ensure we don't leave the page, but reset UI
         event.preventDefault(); 
         handleDisconnect(false); // Clean disconnect, no error modal
       };
@@ -739,7 +735,15 @@ function GhostContent() {
                       <p className="text-neutral-400 text-sm">Create a secure P2P tunnel.</p>
                     </div>
                   </motion.button>
-                  <motion.button whileHover={{ scale: 1.02 }} onClick={() => setTransferMode("RECEIVE")} className="group relative overflow-hidden rounded-3xl bg-neutral-900/40 border border-white/5 p-8 text-left hover:border-violet-500/30 transition-all backdrop-blur-sm">
+                  <motion.button 
+                      whileHover={{ scale: 1.02 }} 
+                      onClick={() => {
+                          // 🟢 FORCE CLEAR on Click
+                          setRoomId(""); 
+                          setTransferMode("RECEIVE");
+                      }} 
+                      className="group relative overflow-hidden rounded-3xl bg-neutral-900/40 border border-white/5 p-8 text-left hover:border-violet-500/30 transition-all backdrop-blur-sm"
+                   >
                     <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                     <div className="relative z-10">
                       <div className="w-12 h-12 bg-neutral-800/80 rounded-2xl flex items-center justify-center mb-6 text-violet-400 border border-white/5 shadow-inner"><Signal className="w-6 h-6" /></div>
@@ -845,9 +849,12 @@ function GhostContent() {
                             
                             <div className="w-full space-y-4">
                                 <div className="relative">
+                                  {/* 🟢 ADDED: autoComplete='off' */}
                                   <input 
                                     type="text" 
                                     placeholder="000 000" 
+                                    autoComplete="off"
+                                    autoCorrect="off"
                                     onChange={(e) => setRoomId(e.target.value)} 
                                     value={roomId} 
                                     className="w-full bg-neutral-950/80 border border-white/10 rounded-xl p-4 text-center text-2xl tracking-[0.5em] font-mono text-white focus:outline-none focus:border-violet-500 transition-all placeholder:text-neutral-800" 

@@ -3,7 +3,7 @@
 import { useRef, useEffect } from "react";
 import Link from "next/link"; 
 import { motion, useScroll, useTransform, useMotionTemplate } from "framer-motion";
-import { Ghost, ArrowRight, Zap, Shield, Globe, Cpu, Lock, Fingerprint, Wifi, Github, ExternalLink } from "lucide-react";
+import { Ghost, ArrowRight, Zap, Shield, Globe, Cpu, Lock, Fingerprint, Wifi, Github, ExternalLink, Infinity} from "lucide-react";
 
 // ============================================================
 // GHOSTDROP LANDING PAGE 
@@ -187,12 +187,12 @@ function GhostHero() {
   );
 }
 // ============================================================
-// PARALLAX STATS COMPONENT
+// PARALLAX STATS COMPONENT (FIXED INFINITY SYMBOL)
 // ============================================================
 const stats = [
   { value: "0", label: "Data Stored" },
   { value: "0", label: "Logs Kept" },
-  { value: "∞", label: "Privacy" },
+  { value: "∞", label: "Privacy" }, // We will detect this symbol below
   { value: "256", label: "Bit Encryption" },
 ];
 
@@ -209,7 +209,7 @@ function ParallaxStats() {
 
   return (
     <section ref={sectionRef} className="relative py-32 md:py-48 px-6 overflow-hidden">
-      {/* Parallax background text */}
+      {/* Background Parallax Text */}
       <motion.div
         style={{ y: y1 }}
         className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
@@ -228,11 +228,23 @@ function ParallaxStats() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: index * 0.1, duration: 0.6 }}
-              className="text-center"
+              className="text-center flex flex-col items-center"
             >
-              <div className="text-6xl md:text-8xl font-black tracking-tighter mb-4 text-glow">
-                {stat.value}
-              </div>
+              {/* LOGIC: If value is "∞", render the Icon. Otherwise, render Text. */}
+              {stat.value === "∞" ? (
+                <div className="h-16 md:h-24 flex items-center mb-4">
+                  <Infinity 
+                    size={80} 
+                    strokeWidth={2.5} // Thicker lines to match the bold text
+                    className="text-white icon-glow w-16 h-16 md:w-24 md:h-24" 
+                  />
+                </div>
+              ) : (
+                <div className="text-6xl md:text-8xl font-black tracking-tighter mb-4 text-glow">
+                  {stat.value}
+                </div>
+              )}
+
               <div className="text-neutral-500 text-sm tracking-[0.3em] uppercase">
                 {stat.label}
               </div>
@@ -240,6 +252,7 @@ function ParallaxStats() {
           ))}
         </div>
 
+        {/* Separator Line */}
         <motion.div
           initial={{ scaleX: 0 }}
           whileInView={{ scaleX: 1 }}
@@ -248,6 +261,7 @@ function ParallaxStats() {
           className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mt-24"
         />
 
+        {/* Quote */}
         <motion.blockquote
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
@@ -266,7 +280,6 @@ function ParallaxStats() {
     </section>
   );
 }
-
 // ============================================================
 // FEATURE SECTION COMPONENT
 // ============================================================
@@ -540,5 +553,11 @@ body {
     0 0 30px rgba(255, 255, 255, 0.6),  /* Mid range */
     0 0 60px rgba(255, 255, 255, 0.4),  /* Soft bloom */
     0 0 100px rgba(255, 255, 255, 0.2); /* Wide ambience */
+}
+
+/* NEW: Use drop-shadow for Icons because text-shadow doesn't work on SVGs */
+.icon-glow {
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8))
+          drop-shadow(0 0 20px rgba(255, 255, 255, 0.4));
 }
 `;

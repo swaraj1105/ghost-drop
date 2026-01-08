@@ -92,7 +92,7 @@ function Navbar() {
 }
 
 // ============================================================
-// GHOST HERO COMPONENT (BACKLIT / HALO EFFECT)
+// GHOST HERO COMPONENT (WARP SPEED TRANSITION)
 // ============================================================
 function GhostHero() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -101,36 +101,55 @@ function GhostHero() {
     offset: ["start start", "end start"],
   });
 
-  const blurValue = useTransform(scrollYProgress, [0, 0.5], [0, 10]);
+  // 1. ZOOM EFFECT: Scale goes from 1 to 15 (Massive zoom)
+  const scale = useTransform(scrollYProgress, [0, 0.6], [1, 1.5]);
+
+  // 2. TEXT SPREAD: Letters fly apart as you zoom in
+  const letterSpacingValue = useTransform(scrollYProgress, [0, 0.8], [-0.05, 0.5]);
+  const letterSpacing = useMotionTemplate`${letterSpacingValue}em`;
+
+  // 3. BLUR: Gets blurry as it gets "too close" to camera
+  const blurValue = useTransform(scrollYProgress, [0, 0.5], [0, 20]);
   const blur = useMotionTemplate`blur(${blurValue}px)`;
-  const opacity = useTransform(scrollYProgress, [0, 0.6], [1, 0]);
-  const scale = useTransform(scrollYProgress, [0, 0.5], [1, 1.1]);
+
+  // 4. FADE OUT: Disappears just before it gets pixelated
+  const opacity = useTransform(scrollYProgress, [0, 0.4], [1, 0]);
+
+  // 5. BUTTON ANIMATION: Slides down and fades out quickly so it doesn't block the zoom
+  const buttonOpacity = useTransform(scrollYProgress, [0, 0.2], [1, 0]);
+  const buttonY = useTransform(scrollYProgress, [0, 0.2], [0, 100]);
 
   return (
-    <section ref={containerRef} className="relative min-h-[150vh] flex flex-col items-center justify-start">
+    <section ref={containerRef} className="relative min-h-[200vh] flex flex-col items-center justify-start">
       <div className="sticky top-0 h-screen w-full flex flex-col items-center overflow-hidden">
         
         {/* Grid background */}
         <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:60px_60px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_40%,transparent_100%)]" />
 
         {/* 1. TEXT CONTAINER */}
-        <div className="flex-1 w-full flex flex-col items-center justify-center relative z-10 p-6">
+        <div className="flex-1 w-full flex flex-col items-center justify-center relative z-10 p-6 perspective-1000">
           <motion.div
-            className="flex flex-col items-center relative" // Added 'relative' here
-            style={{ filter: blur, opacity, scale }}
+            className="flex flex-col items-center relative origin-center" 
+            style={{ 
+              filter: blur, 
+              opacity, 
+              scale,
+            }}
           >
-            {/* --- THE BACKLIGHT LAYER --- */}
-            {/* This is a blurred copy sitting behind the main text */}
-            <span 
+            {/* BACKLIGHT LAYER */}
+            <motion.span 
               className="absolute inset-0 z-0 text-[20vw] md:text-[18vw] font-black leading-none text-white/60 blur-[40px] select-none"
+              style={{ letterSpacing }}
               aria-hidden="true"
             >
               GHOST
-            </span>
+            </motion.span>
 
-            {/* --- THE SHARP FRONT LAYER --- */}
-            {/* Solid white, sharp edges, sitting on top (z-10) */}
-            <motion.h1 className="relative z-10 text-[20vw] md:text-[18vw] font-black leading-none text-white select-none">
+            {/* FRONT LAYER */}
+            <motion.h1 
+              className="relative z-10 text-[20vw] md:text-[18vw] font-black leading-none text-white select-none"
+              style={{ letterSpacing }}
+            >
               GHOST
             </motion.h1>
             
@@ -143,7 +162,7 @@ function GhostHero() {
         {/* 2. BUTTON CONTAINER */}
         <motion.div
           className="relative z-50 flex flex-col items-center gap-6 pb-32 md:pb-20" 
-          initial={{ opacity: 1, y: 0 }}
+          style={{ opacity: buttonOpacity, y: buttonY }}
         >
           <Link href="/dashboard/ghost?action=broadcast">
             <motion.button

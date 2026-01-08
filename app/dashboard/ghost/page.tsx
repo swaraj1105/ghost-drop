@@ -13,6 +13,7 @@ import {
   AlertTriangle, X, Loader2, QrCode, Share2, Terminal, ScanLine, Sparkles, RefreshCw
 } from "lucide-react";
 
+// import MatrixRain from "@/components/MatrixRain"; // Adjust path if needed
 // --- 0. ANIMATION COMPONENTS ---
 
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+[]{}|;:,.<>?";
@@ -594,6 +595,8 @@ function GhostContent() {
       className="min-h-screen bg-black text-white font-sans selection:bg-indigo-500/30 overflow-hidden relative group"
       onMouseMove={handleMouseMove}
     >
+
+      {/* <MatrixRain /> */}
       <canvas ref={canvasRef} className="hidden" />
 
       {/* --- BACKGROUND EFFECTS --- */}
@@ -795,10 +798,20 @@ function GhostContent() {
               {/* --- RECEIVER UI --- */}
               {transferMode === "RECEIVE" && (
                   <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-neutral-900/40 border border-white/10 rounded-3xl p-8 backdrop-blur-md max-w-xl mx-auto min-h-[500px] flex flex-col relative overflow-hidden">
-                    <div className="flex items-center justify-between mb-8 relative z-10">
-                        <button onClick={() => handleDisconnect(false)} className="flex items-center text-xs font-bold text-neutral-500 hover:text-white transition-colors uppercase tracking-wider"><ArrowLeft className="w-4 h-4 mr-1" /> Terminate</button>
-                        <p className="text-violet-400 font-mono text-xs animate-pulse">{status}</p>
-                    </div>
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 relative z-10">
+    {/* Terminate Button */}
+    <button 
+        onClick={() => handleDisconnect(false)} 
+        className="self-start flex items-center text-xs font-bold text-neutral-500 hover:text-white transition-colors uppercase tracking-wider"
+    >
+        <ArrowLeft className="w-4 h-4 mr-1" /> Terminate
+    </button>
+    
+    {/* Status Text (Now pushes to new line on mobile if needed) */}
+    <p className="text-violet-400 font-mono text-xs animate-pulse break-words text-left md:text-right">
+        {status}
+    </p>
+</div>
 
                     {!isConnected ? (
                         <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-in fade-in relative z-10">

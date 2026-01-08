@@ -432,7 +432,7 @@ function GhostFooter() {
         </motion.p>
 
         <motion.a
-          href="https://github.com"
+          href="https://github.com/swaraj1105/ghost-drop"
           target="_blank"
           rel="noopener noreferrer"
           initial={{ opacity: 0, scale: 0.9 }}

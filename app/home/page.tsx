@@ -92,7 +92,7 @@ function Navbar() {
 }
 
 // ============================================================
-// GHOST HERO COMPONENT (WARP SPEED TRANSITION)
+// GHOST HERO COMPONENT (OPTIMIZED FOR PERFORMANCE)
 // ============================================================
 function GhostHero() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -101,32 +101,28 @@ function GhostHero() {
     offset: ["start start", "end start"],
   });
 
-  // 1. ZOOM EFFECT: Scale goes from 1 to 15 (Massive zoom)
-  const scale = useTransform(scrollYProgress, [0, 0.6], [1, 1.5]);
+  // 1. ZOOM: 1 to 1.5
+  const scale = useTransform(scrollYProgress, [0, 1], [1, 1.5]);
 
-  // 2. TEXT SPREAD: Letters fly apart as you zoom in
-  const letterSpacingValue = useTransform(scrollYProgress, [0, 0.8], [-0.05, 0.5]);
-  const letterSpacing = useMotionTemplate`${letterSpacingValue}em`;
+  // 2. FADE: 1 to 0
+  const opacity = useTransform(scrollYProgress, [0, 0.8], [1, 0]);
 
-  // 3. BLUR: Gets blurry as it gets "too close" to camera
-  const blurValue = useTransform(scrollYProgress, [0, 0.5], [0, 20]);
+  // 3. BLUR: Reduced max blur from 10px to 5px to save GPU load
+  const blurValue = useTransform(scrollYProgress, [0, 0.8], [0, 5]);
   const blur = useMotionTemplate`blur(${blurValue}px)`;
 
-  // 4. FADE OUT: Disappears just before it gets pixelated
-  const opacity = useTransform(scrollYProgress, [0, 0.4], [1, 0]);
-
-  // 5. BUTTON ANIMATION: Slides down and fades out quickly so it doesn't block the zoom
-  const buttonOpacity = useTransform(scrollYProgress, [0, 0.2], [1, 0]);
-  const buttonY = useTransform(scrollYProgress, [0, 0.2], [0, 100]);
+  // 4. BUTTON ANIMATION
+  const buttonOpacity = useTransform(scrollYProgress, [0, 0.3], [1, 0]);
+  const buttonY = useTransform(scrollYProgress, [0, 0.3], [0, 50]);
 
   return (
-    <section ref={containerRef} className="relative min-h-[200vh] flex flex-col items-center justify-start">
+    <section ref={containerRef} className="relative min-h-[150vh] flex flex-col items-center justify-start">
       <div className="sticky top-0 h-screen w-full flex flex-col items-center overflow-hidden">
         
-        {/* Grid background */}
-        <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:60px_60px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_40%,transparent_100%)]" />
+        {/* Grid background - Added translateZ(0) for hardware acceleration */}
+        <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:60px_60px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_40%,transparent_100%)]" style={{ transform: "translateZ(0)" }} />
 
-        {/* 1. TEXT CONTAINER */}
+        {/* TEXT CONTAINER */}
         <div className="flex-1 w-full flex flex-col items-center justify-center relative z-10 p-6 perspective-1000">
           <motion.div
             className="flex flex-col items-center relative origin-center" 
@@ -134,32 +130,31 @@ function GhostHero() {
               filter: blur, 
               opacity, 
               scale,
+              // PERFORMANCE FIXES:
+              willChange: "transform, opacity, filter", // Keeps it in GPU memory
+              transform: "translate3d(0,0,0)", // Forces hardware acceleration
             }}
           >
             {/* BACKLIGHT LAYER */}
-            <motion.span 
+            <span 
               className="absolute inset-0 z-0 text-[20vw] md:text-[18vw] font-black leading-none text-white/60 blur-[40px] select-none"
-              style={{ letterSpacing }}
               aria-hidden="true"
             >
               GHOST
-            </motion.span>
+            </span>
 
             {/* FRONT LAYER */}
-            <motion.h1 
-              className="relative z-10 text-[20vw] md:text-[18vw] font-black leading-none text-white select-none"
-              style={{ letterSpacing }}
-            >
+            <h1 className="relative z-10 text-[20vw] md:text-[18vw] font-black leading-none text-white select-none">
               GHOST
-            </motion.h1>
+            </h1>
             
-            <motion.p className="text-neutral-500 text-sm md:text-xl tracking-[0.3em] uppercase mt-4 text-center relative z-20">
+            <p className="text-neutral-500 text-sm md:text-xl tracking-[0.3em] uppercase mt-4 text-center relative z-20">
               Leave No Trace
-            </motion.p>
+            </p>
           </motion.div>
         </div>
 
-        {/* 2. BUTTON CONTAINER */}
+        {/* BUTTON CONTAINER */}
         <motion.div
           className="relative z-50 flex flex-col items-center gap-6 pb-32 md:pb-20" 
           style={{ opacity: buttonOpacity, y: buttonY }}
@@ -186,6 +181,7 @@ function GhostHero() {
     </section>
   );
 }
+
 // ============================================================
 // PARALLAX STATS COMPONENT (FIXED INFINITY SYMBOL)
 // ============================================================
@@ -508,7 +504,7 @@ function GhostFooter() {
 }
 
 // ============================================================
-// REQUIRED CSS STYLES (UPDATED GLOW)
+// REQUIRED CSS STYLES (UPDATED WITH INTENSE GLOW)
 // ============================================================
 const CSS_STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
@@ -546,18 +542,20 @@ body {
               0 0 80px -10px rgba(16, 185, 129, 0.4);
 }
 
-/* UPDATED: Hyper-Intense White Bloom */
+/* --- NEW INTENSE WHITE BLOOM GLOW --- */
 .text-glow {
-  text-shadow: 
-    0 0 15px rgba(255, 255, 255, 0.8),  /* Tight core */
-    0 0 30px rgba(255, 255, 255, 0.6),  /* Mid range */
-    0 0 60px rgba(255, 255, 255, 0.4),  /* Soft bloom */
-    0 0 100px rgba(255, 255, 255, 0.2); /* Wide ambience */
+  text-shadow:
+    0 0 10px rgba(255, 255, 255, 0.8),  /* Bright inner glow for definition */
+    0 0 25px rgba(255, 255, 255, 0.6),  /* Softer medium glow */
+    0 0 50px rgba(255, 255, 255, 0.4),  /* Wide bloom effect */
+    0 0 100px rgba(255, 255, 255, 0.2); /* Very wide atmospheric light */
 }
 
-/* NEW: Use drop-shadow for Icons because text-shadow doesn't work on SVGs */
+/* Use drop-shadow for Icons */
 .icon-glow {
   filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8))
-          drop-shadow(0 0 20px rgba(255, 255, 255, 0.4));
+          drop-shadow(0 0 25px rgba(255, 255, 255, 0.5))
+          drop-shadow(0 0 50px rgba(255, 255, 255, 0.3));
 }
 `;
+

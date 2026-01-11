@@ -173,9 +173,11 @@ function GhostContent() {
   }, [roomId]);
 
 
-  // --- HELPER: DISCONNECT LOGIC ---
+  // --- HELPER: DISCONNECT LOGIC (FIXED) ---
   const handleDisconnect = async (showModal = false) => {
-    if (!showModal) isSelfDisconnecting.current = true;
+    // FIX: Lock immediately to prevent double-firing from destroyRoom callbacks
+    isSelfDisconnecting.current = true;
+
     if (roomId) {
       await destroyRoom(roomId);
       setRoomId("");

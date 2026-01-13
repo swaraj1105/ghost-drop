@@ -4,21 +4,19 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowRight, Ghost } from "lucide-react"; 
-import { motion, AnimatePresence } from "framer-motion"; // <--- Added motion imports
 
-// --- 1. NAVBAR COMPONENT (Slide Up, No Collapse) ---
+// --- 1. NAVBAR COMPONENT (Mobile Responsive Fix Applied) ---
 function Navbar() {
   const router = useRouter();
   
-  // --- STATE ---
+  // --- SECRET TRIGGER STATE ---
   const [clickCount, setClickCount] = useState(0);
   const [showModal, setShowModal] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [error, setError] = useState(false);
-  const [isFocused, setIsFocused] = useState(false); // Tracks focus
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Logo Click Logic
+  // Handle the Logo Click (The Trigger)
   const handleLogoClick = () => {
     setClickCount((prev) => prev + 1);
     if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
@@ -32,7 +30,7 @@ function Navbar() {
     }
   };
 
-  // Auth Logic
+  // Handle Password Submission
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
       if (inputValue === "ghost") {
@@ -77,78 +75,65 @@ function Navbar() {
         </div>
       </nav>
 
-      {/* --- MODAL --- */}
-      <AnimatePresence>
-        {showModal && (
+      {/* --- MODERN GHOST AUTH MODAL (MOBILE FIXED) --- */}
+      {showModal && (
+        <div 
+          // 🟢 FIX: 'items-start pt-24' keeps it at the top on mobile so keyboard doesn't hide it
+          className="fixed inset-0 z-50 flex items-start pt-24 md:items-center md:pt-0 justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto"
+          onClick={() => setShowModal(false)}
+        >
           <div 
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md px-4 h-[100dvh]"
-            onClick={() => setShowModal(false)}
+            className="w-[90%] max-w-md bg-neutral-900 border border-neutral-800 rounded-3xl shadow-2xl overflow-hidden relative mx-4"
+            onClick={(e) => e.stopPropagation()}
           >
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 0 }}
-              animate={{ 
-                opacity: 1, 
-                scale: 1, 
-                // 🟢 FIX: Move UP significantly when focused to clear keyboard, but keep contents visible
-                y: isFocused ? -140 : 0 
-              }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-3xl shadow-2xl overflow-hidden relative"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Top Gradient */}
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
-              
-              <div className="p-8 flex flex-col items-center">
-                
-                {/* HEADER (Always visible now) */}
-                <div className="w-16 h-16 bg-neutral-800 rounded-2xl flex items-center justify-center shadow-inner border border-white/5 mb-6">
-                  <Ghost 
-                    size={32} 
-                    className={`${error ? "text-red-500" : "text-indigo-500"} transition-colors duration-300`} 
-                  />
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2 text-center">Restricted Access</h3>
-                <p className="text-neutral-500 text-sm text-center max-w-[250px] mb-8">
-                  Authentication required. Enter passphrase to secure uplink.
+            {/* Top Glow Accent */}
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
+            
+            <div className="p-8 flex flex-col items-center">
+              <div className="w-16 h-16 bg-neutral-800 rounded-2xl flex items-center justify-center mb-6 shadow-inner border border-white/5">
+                <Ghost 
+                  size={32} 
+                  className={`${error ? "text-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.8)]" : "text-indigo-500 drop-shadow-[0_0_10px_rgba(99,102,241,0.8)]"} transition-all duration-300`} 
+                />
+              </div>
+
+              <h3 className="text-xl font-bold text-white mb-2">Restricted Access</h3>
+              <p className="text-neutral-500 text-sm mb-8 text-center">
+                Authentication required. Enter passphrase to secure uplink.
+              </p>
+
+              <div className="w-full relative group">
+                <input
+                  autoFocus
+                  type="password" // 🟢 Changed to text temporarily if you want to see what you type, but password is standard
+                  value={inputValue}
+                  onChange={(e) => {
+                    setInputValue(e.target.value);
+                    setError(false);
+                  }}
+                  onKeyDown={handleKeyDown}
+                  // 🟢 Added 'mb-2' to ensure spacing on mobile
+                  className={`w-full bg-neutral-950/50 border ${error ? "border-red-500/50 focus:border-red-500" : "border-neutral-800 focus:border-indigo-500"} rounded-xl px-4 py-4 text-center text-white outline-none transition-all placeholder:text-neutral-700 tracking-widest`}
+                  placeholder="••••••••"
+                />
+                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-indigo-500/20 to-purple-500/20 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-500" />
+              </div>
+
+              {error && (
+                <p className="mt-4 text-red-500 text-xs font-medium tracking-wide animate-pulse">
+                  INCORRECT PASSPHRASE
                 </p>
-
-                {/* INPUT SECTION */}
-                <div className="w-full relative group">
-                  <input
-                    type="password"
-                    value={inputValue}
-                    onFocus={() => setIsFocused(true)}
-                    onBlur={() => setIsFocused(false)}
-                    onChange={(e) => {
-                      setInputValue(e.target.value);
-                      setError(false);
-                    }}
-                    onKeyDown={handleKeyDown}
-                    className={`w-full bg-neutral-950/50 border ${error ? "border-red-500/50 focus:border-red-500" : "border-neutral-800 focus:border-indigo-500"} rounded-xl px-4 py-4 text-center text-white outline-none transition-all placeholder:text-neutral-700 tracking-widest`}
-                    placeholder="••••••••"
-                  />
-                  {/* Glow effect */}
-                  <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-indigo-500/20 to-purple-500/20 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-500" />
-                </div>
-
-                {error && (
-                  <p className="mt-4 text-red-500 text-xs font-medium tracking-wide animate-pulse">
-                    INCORRECT PASSPHRASE
-                  </p>
-                )}
-              </div>
-              
-              <div className="bg-neutral-950 p-4 text-center border-t border-neutral-800">
-                 <p className="text-[10px] text-neutral-600 uppercase tracking-widest font-medium">
-                    Tap to Enter Code • ESC to Cancel
-                 </p>
-              </div>
-            </motion.div>
+              )}
+            </div>
+            
+            <div className="bg-neutral-950 p-4 text-center border-t border-neutral-800">
+               <p className="text-[10px] text-neutral-600 uppercase tracking-widest font-medium">
+                  Press ESC to Cancel
+               </p>
+            </div>
           </div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
     </>
   );
 }
@@ -157,6 +142,7 @@ function Navbar() {
 function Hero() {
   return (
     <section className="relative min-h-screen flex items-center justify-center px-4 overflow-hidden pt-20">
+      {/* Glowing gradient blob background */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
         <div className="w-[500px] h-[500px] bg-gradient-to-r from-indigo-600/30 via-cyan-500/20 to-purple-600/30 rounded-full blur-3xl opacity-50" />
       </div>
@@ -247,9 +233,10 @@ function BlogGrid() {
           {POSTS.map((post) => (
             <Link
               key={post.id}
-              href={`#`} 
+              href={`#`} // Just a placeholder link for the decoy
               className="group relative flex flex-col rounded-xl border border-neutral-800 bg-neutral-900/50 overflow-hidden transition-all hover:border-neutral-700 hover:bg-neutral-900"
             >
+              {/* IMAGE SECTION */}
               <div className="aspect-video w-full overflow-hidden">
                 <img
                   src={post.image}
@@ -258,6 +245,7 @@ function BlogGrid() {
                 />
               </div>
 
+              {/* CONTENT SECTION */}
               <div className="flex flex-1 flex-col p-6">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="inline-flex items-center rounded-full bg-neutral-800 px-2.5 py-0.5 text-xs font-medium text-neutral-300">

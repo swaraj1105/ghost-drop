@@ -6,11 +6,10 @@ export async function POST(request: Request) {
     const cleanPrompt = encodeURIComponent(prompt);
 
     // ---------------------------------------------------------
-    // STRATEGY 1: POLLINATIONS AI (Switched to 'turbo' for stability)
+    // STRATEGY 1: POLLINATIONS AI
     // ---------------------------------------------------------
     console.log("Strategy 1: Attempting Pollinations...");
     const seed = Math.floor(Math.random() * 100000);
-    // Swapped model=flux to model=turbo. It is much less likely to timeout.
     const pollinationsUrl = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=1024&height=1024&seed=${seed}&nologo=true&model=turbo`;
 
     try {
@@ -33,16 +32,16 @@ export async function POST(request: Request) {
     }
 
     // ---------------------------------------------------------
-    // STRATEGY 2: HUGGING FACE (Upgraded to SDXL - stays 'warm')
+    // STRATEGY 2: HUGGING FACE (Updated to New Router API)
     // ---------------------------------------------------------
     console.log("Strategy 2: Attempting Hugging Face...");
     
     const HF_API_KEY = process.env.HF_API_KEY; 
 
     if (HF_API_KEY) {
-        // Upgraded to SDXL. It is highly active, so HF doesn't put it to sleep.
+        // FIXED: Pointing to the new router.huggingface.co endpoint
         const hfResponse = await fetch(
-          "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+          "https://router.huggingface.co/hf-inference/models/stabilityai/stable-diffusion-xl-base-1.0",
           {
             headers: {
               Authorization: `Bearer ${HF_API_KEY}`,
@@ -60,7 +59,6 @@ export async function POST(request: Request) {
                 headers: { "Content-Type": "image/jpeg" },
             });
         } else {
-            // This will log the EXACT reason Hugging Face rejected the request
             const errorText = await hfResponse.text();
             console.error(`[Hugging Face] Failed: ${hfResponse.status} - ${errorText}`);
         }

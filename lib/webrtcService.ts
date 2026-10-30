@@ -9,10 +9,11 @@ const turnConfig = {
   username: process.env.NEXT_PUBLIC_METERED_USERNAME || "",
   credential: process.env.NEXT_PUBLIC_METERED_PASSWORD || "",
   urls: [
-    "stun:stun.relay.metered.ca:80",
+    "turn:global.turn.metered.ca:443?transport=tcp",
     "turn:global.turn.metered.ca:80?transport=udp",
-    "turn:global.turn.metered.ca:80?transport=tcp",
-    "turn:global.turn.metered.ca:443?transport=tcp"
+    "stun:stun.relay.metered.ca:80",
+    "turn:global.turn.metered.ca:80?transport=tcp"
+    
   ]
 };
 

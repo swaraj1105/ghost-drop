@@ -9,8 +9,8 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Full Stack Engineer | Portfolio & Blog",
-  description: "Building the future of the web. Exploring distributed systems, cryptography, and UI engineering.",
+  title: "GhostDrop | Leave No Trace",
+  description: "Zero-knowledge, peer-to-peer file transfer. No accounts, no logs, no trace.",
   generator: "v0.app",
   icons: {
     icon: [

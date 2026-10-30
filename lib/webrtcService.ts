@@ -1,10 +1,10 @@
 import { db } from "./firebase";
-import { ref, set, onValue, push, child, get, off, remove } from "firebase/database";
+import { ref, set, onValue, push, child, get, remove } from "firebase/database";
 
 // --- CONFIGURATION ---
 const CHUNK_SIZE = 16384; // 16KB chunks
 
-// 🔴 TODO: PASTE YOUR METERED KEYS HERE
+// ✅ SECURED: Credentials pulled from Vercel Environment Variables
 const turnConfig = {
   username: process.env.NEXT_PUBLIC_METERED_USERNAME || "",
   credential: process.env.NEXT_PUBLIC_METERED_PASSWORD || "",
@@ -42,20 +42,9 @@ let receivedBytes = 0;
  *
  * Briefly switching to another app (backgrounding) does NOT end the room: the
  * link is allowed to drop and come back within the grace period.
- *
- * Why a timer? When an app is swiped away the browser gives the page no
- * warning, and from the outside that looks the same as the app being
- * backgrounded. The only reliable difference is time: a backgrounded app
- * comes back, a closed one doesn't.
  */
 const GRACE_MS = 60_000; // how long the other device may stay gone (60 seconds)
 
-/**
- * Connection health, reported to the UI.
- *  - "interrupted": the link dropped (e.g. the other phone was backgrounded). It may come back.
- *  - "failed":      the link is down hard; it may still come back, but not for long.
- *  - "connected":   the link came back after an interruption.
- */
 export type ConnectionHealth = "connected" | "interrupted" | "failed";
 
 let stopWatching: (() => void) | null = null;
@@ -157,17 +146,24 @@ export const createRoom = async (
   await pc.setLocalDescription(offer);
   await set(roomRef, { offer: { sdp: offer.sdp, type: offer.type } });
 
-  onValue(child(roomRef, "answer"), (snapshot) => {
+  // ✅ FIXED: Listen for the Answer first, THEN listen for candidates.
+  // This prevents the mobile race condition where candidates arrive before the answer.
+  onValue(child(roomRef, "answer"), async (snapshot) => {
     const data = snapshot.val();
     if (pc && pc.signalingState === "have-local-offer" && data) {
-      pc.setRemoteDescription(new RTCSessionDescription(data)).catch(e => console.log("Ignore duplicate answer"));
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(data));
+        
+        // Now that RemoteDescription is set, it is safe to process ICE candidates
+        onValue(child(roomRef, "calleeCandidates"), (candSnap) => {
+          candSnap.forEach((c) => {
+            pc?.addIceCandidate(new RTCIceCandidate(c.val())).catch(e => {});
+          });
+        });
+      } catch (err) {
+        console.warn("Ignored duplicate answer or error", err);
+      }
     }
-  });
-
-  onValue(child(roomRef, "calleeCandidates"), (snapshot) => {
-    snapshot.forEach((c) => {
-      pc?.addIceCandidate(new RTCIceCandidate(c.val())).catch(e => {});
-    });
   });
 
   // Watch if the room gets destroyed (by Receiver via Firebase)
@@ -198,7 +194,6 @@ export const joinRoom = async (
   if (pc) pc.close();
   pc = new RTCPeerConnection(servers);
 
-  // A dropped link is a warning first; the room only ends if the other device stays gone.
   stopWatching = watchConnection(pc, onConnectionHealth, onRoomDestroyed);
 
   pc.ondatachannel = (e) => {
@@ -269,8 +264,6 @@ function setupChannel(channel: RTCDataChannel, onOpen: () => void, onFileReceive
  * 3. PUBLIC: Send File (Streaming Mode)
  */
 export const sendFile = async (file: File) => {
-  // Throw (don't silently return) so the UI can say "Transfer Interrupted"
-  // instead of "All Transfers Complete" when the link is down.
   if (!dataChannel || dataChannel.readyState !== "open") {
     throw new Error("Connection is not open");
   }

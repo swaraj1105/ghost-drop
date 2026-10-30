@@ -1,272 +1,408 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { ArrowRight, Ghost } from "lucide-react"; 
+import { useRef, useEffect } from "react";
+import Link from "next/link"; 
+import { motion, useScroll, useTransform, useMotionTemplate } from "framer-motion";
+import { Ghost, ArrowRight, Zap, Shield, Globe, Cpu, Lock, Fingerprint, Wifi, Github, ExternalLink, Infinity} from "lucide-react";
 
-// --- 1. NAVBAR COMPONENT (Mobile Responsive Fix Applied) ---
-function Navbar() {
-  const router = useRouter();
-  
-  // --- SECRET TRIGGER STATE ---
-  const [clickCount, setClickCount] = useState(0);
-  const [showModal, setShowModal] = useState(false);
-  const [inputValue, setInputValue] = useState("");
-  const [error, setError] = useState(false);
-  const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+// ============================================================
+// GHOSTDROP LANDING PAGE 
+// ============================================================
 
-  // Handle the Logo Click (The Trigger)
-  const handleLogoClick = () => {
-    setClickCount((prev) => prev + 1);
-    if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
-    clickTimeoutRef.current = setTimeout(() => setClickCount(0), 2000);
-
-    if (clickCount + 1 >= 5) {
-      setShowModal(true);
-      setClickCount(0);
-      setInputValue("");
-      setError(false);
-    }
-  };
-
-  // Handle Password Submission
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      if (inputValue === "ghost") {
-        localStorage.setItem("ghost_token", "ACCESS_GRANTED");
-        router.push("/uplink");
-        setShowModal(false);
-      } else {
-        setError(true);
-        setInputValue("");
-      }
-    }
-  };
-
+export default function LandingPage() {
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShowModal(false);
-    };
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
+    // Inject styles dynamically so you don't need to touch global.css
+    const style = document.createElement('style');
+    style.textContent = CSS_STYLES;
+    document.head.appendChild(style);
+    return () => { document.head.removeChild(style); };
   }, []);
 
   return (
-    <>
-      <nav className="fixed top-4 left-1/2 -translate-x-1/2 z-40 w-[95%] max-w-6xl">
-        <div className="bg-neutral-900/80 backdrop-blur-md border border-neutral-800 rounded-2xl px-6 py-4 shadow-lg">
-          <div className="flex items-center justify-between">
-            <div 
-              onClick={handleLogoClick}
-              className="flex items-center gap-2 cursor-pointer select-none active:scale-95 transition-transform"
-            >
-              <div className="w-8 h-8 bg-gradient-to-br from-cyan-500 to-indigo-600 rounded-lg shadow-inner" />
-              <span className="font-semibold text-white tracking-tight">DevLog</span>
-            </div>
-
-            <div className="hidden md:flex items-center gap-8">
-              <a href="#work" className="text-sm text-neutral-400 hover:text-white transition-colors">Work</a>
-              <a href="#blog" className="text-sm text-neutral-400 hover:text-white transition-colors">Blog</a>
-              <a href="#about" className="text-sm text-neutral-400 hover:text-white transition-colors">About</a>
-              <a href="#contact" className="px-4 py-2 bg-white text-neutral-950 text-sm font-medium rounded-lg hover:bg-neutral-200 transition-colors">Contact</a>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      {/* --- MODERN GHOST AUTH MODAL (MOBILE FIXED) --- */}
-      {showModal && (
-        <div 
-          // 🟢 FIX: 'items-start pt-24' keeps it at the top on mobile so keyboard doesn't hide it
-          className="fixed inset-0 z-50 flex items-start pt-24 md:items-center md:pt-0 justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-200 overflow-y-auto"
-          onClick={() => setShowModal(false)}
-        >
-          <div 
-            className="w-[90%] max-w-md bg-neutral-900 border border-neutral-800 rounded-3xl shadow-2xl overflow-hidden relative mx-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Top Glow Accent */}
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
-            
-            <div className="p-8 flex flex-col items-center">
-              <div className="w-16 h-16 bg-neutral-800 rounded-2xl flex items-center justify-center mb-6 shadow-inner border border-white/5">
-                <Ghost 
-                  size={32} 
-                  className={`${error ? "text-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.8)]" : "text-indigo-500 drop-shadow-[0_0_10px_rgba(99,102,241,0.8)]"} transition-all duration-300`} 
-                />
-              </div>
-
-              <h3 className="text-xl font-bold text-white mb-2">Restricted Access</h3>
-              <p className="text-neutral-500 text-sm mb-8 text-center">
-                Authentication required. Enter passphrase to secure uplink.
-              </p>
-
-              <div className="w-full relative group">
-                <input
-                  autoFocus
-                  type="password" // 🟢 Changed to text temporarily if you want to see what you type, but password is standard
-                  value={inputValue}
-                  onChange={(e) => {
-                    setInputValue(e.target.value);
-                    setError(false);
-                  }}
-                  onKeyDown={handleKeyDown}
-                  // 🟢 Added 'mb-2' to ensure spacing on mobile
-                  className={`w-full bg-neutral-950/50 border ${error ? "border-red-500/50 focus:border-red-500" : "border-neutral-800 focus:border-indigo-500"} rounded-xl px-4 py-4 text-center text-white outline-none transition-all placeholder:text-neutral-700 tracking-widest`}
-                  placeholder="••••••••"
-                />
-                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-indigo-500/20 to-purple-500/20 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-500" />
-              </div>
-
-              {error && (
-                <p className="mt-4 text-red-500 text-xs font-medium tracking-wide animate-pulse">
-                  INCORRECT PASSPHRASE
-                </p>
-              )}
-            </div>
-            
-            <div className="bg-neutral-950 p-4 text-center border-t border-neutral-800">
-               <p className="text-[10px] text-neutral-600 uppercase tracking-widest font-medium">
-                  Press ESC to Cancel
-               </p>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    <div className="min-h-screen bg-black text-white overflow-x-hidden font-sans antialiased selection:bg-indigo-500/30">
+      {/* Film grain noise overlay */}
+      <div className="noise-overlay" />
+      
+      <Navbar />
+      <GhostHero />
+      <ParallaxStats />
+      <FeatureSection />
+      <GhostFooter />
+    </div>
   );
 }
 
-// --- 2. HERO COMPONENT ---
-function Hero() {
+// ============================================================
+// NAVBAR COMPONENT
+// ============================================================
+function Navbar() {
+  const { scrollY } = useScroll();
+  const backgroundColor = useTransform(
+    scrollY,
+    [0, 100],
+    ["rgba(0, 0, 0, 0)", "rgba(0, 0, 0, 0.8)"]
+  );
+  const borderOpacity = useTransform(scrollY, [0, 100], [0, 1]);
+
   return (
-    <section className="relative min-h-screen flex items-center justify-center px-4 overflow-hidden pt-20">
-      {/* Glowing gradient blob background */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-[500px] h-[500px] bg-gradient-to-r from-indigo-600/30 via-cyan-500/20 to-purple-600/30 rounded-full blur-3xl opacity-50" />
+    <motion.nav
+      style={{ backgroundColor }}
+      className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl"
+    >
+      <motion.div
+        style={{ opacity: borderOpacity }}
+        className="absolute bottom-0 left-0 right-0 h-px bg-white/10"
+      />
+      
+      <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+        {/* Logo */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="flex items-center gap-3"
+        >
+          <div className="relative w-10 h-10 flex items-center justify-center">
+            <div className="absolute inset-0 bg-indigo-500 blur-xl opacity-20 animate-pulse" />
+            <div className="relative w-full h-full bg-gradient-to-tr from-neutral-900 to-neutral-800 rounded-xl flex items-center justify-center border border-white/10">
+              <Ghost className="w-5 h-5 text-white" />
+            </div>
+          </div>
+          <span className="font-bold tracking-tight text-xl">GhostDrop</span>
+        </motion.div>
+
+        {/* CTA Button - FIXED LINK */}
+        <Link href="/dashboard/ghost">
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="group relative inline-flex h-11 overflow-hidden rounded-full p-[1px] focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-black cursor-pointer"
+          >
+            <span className="absolute inset-[-1000%] animate-[spin_3s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#666_0%,#fff_50%,#666_100%)]" />
+            <span className="inline-flex h-full w-full items-center justify-center rounded-full bg-black px-6 py-1 text-sm font-semibold text-white backdrop-blur-3xl transition-all group-hover:bg-neutral-900">
+              Launch App
+              <ArrowRight size={14} className="ml-2 group-hover:translate-x-1 transition-transform" />
+            </span>
+          </motion.div>
+        </Link>
       </div>
+    </motion.nav>
+  );
+}
 
-      <div className="relative z-10 max-w-4xl mx-auto text-center">
-        <h1 className="text-6xl md:text-8xl font-bold tracking-tight text-white mb-6">
-          Building the future of the web.
-        </h1>
-        <p className="text-xl md:text-2xl text-neutral-400 max-w-2xl mx-auto leading-relaxed">
-          Exploring distributed systems, cryptography, and UI engineering.
-        </p>
+// ============================================================
+// GHOST HERO COMPONENT (OPTIMIZED FOR PERFORMANCE)
+// ============================================================
+function GhostHero() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: containerRef,
+    offset: ["start start", "end start"],
+  });
 
-        <div className="mt-12 flex items-center justify-center gap-4">
-          <a href="#blog" className="px-6 py-3 bg-white text-neutral-950 font-medium rounded-lg hover:bg-neutral-200 transition-colors">
-            Read my blog
-          </a>
-          <a href="#work" className="px-6 py-3 border border-neutral-700 text-white font-medium rounded-lg hover:bg-neutral-900 transition-colors">
-            View projects
-          </a>
+  // 1. ZOOM: 1 to 1.5
+  const scale = useTransform(scrollYProgress, [0, 1], [1, 1.5]);
+
+  // 2. FADE: 1 to 0
+  const opacity = useTransform(scrollYProgress, [0, 0.8], [1, 0]);
+
+  // 3. BLUR: Reduced max blur from 10px to 5px to save GPU load
+  const blurValue = useTransform(scrollYProgress, [0, 0.8], [0, 5]);
+  const blur = useMotionTemplate`blur(${blurValue}px)`;
+
+  // 4. BUTTON ANIMATION
+  const buttonOpacity = useTransform(scrollYProgress, [0, 0.3], [1, 0]);
+  const buttonY = useTransform(scrollYProgress, [0, 0.3], [0, 50]);
+
+  return (
+    <section ref={containerRef} className="relative min-h-[150vh] flex flex-col items-center justify-start">
+      <div className="sticky top-0 h-screen w-full flex flex-col items-center overflow-hidden">
+        
+        {/* Grid background - Added translateZ(0) for hardware acceleration */}
+        <div className="absolute inset-0 z-0 bg-[linear-gradient(to_right,#ffffff08_1px,transparent_1px),linear-gradient(to_bottom,#ffffff08_1px,transparent_1px)] bg-[size:60px_60px] [mask-image:radial-gradient(ellipse_80%_50%_at_50%_50%,#000_40%,transparent_100%)]" style={{ transform: "translateZ(0)" }} />
+
+        {/* TEXT CONTAINER */}
+        <div className="flex-1 w-full flex flex-col items-center justify-center relative z-10 p-6 perspective-1000">
+          <motion.div
+            className="flex flex-col items-center relative origin-center" 
+            style={{ 
+              filter: blur, 
+              opacity, 
+              scale,
+              // PERFORMANCE FIXES:
+              willChange: "transform, opacity, filter", // Keeps it in GPU memory
+              transform: "translate3d(0,0,0)", // Forces hardware acceleration
+            }}
+          >
+            {/* BACKLIGHT LAYER */}
+            <span 
+              className="absolute inset-0 z-0 text-[20vw] md:text-[18vw] font-black leading-none text-white/60 blur-[40px] select-none"
+              aria-hidden="true"
+            >
+              GHOST
+            </span>
+
+            {/* FRONT LAYER */}
+            <h1 className="relative z-10 text-[20vw] md:text-[18vw] font-black leading-none text-white select-none">
+              GHOST
+            </h1>
+            
+            <p className="text-neutral-500 text-sm md:text-xl tracking-[0.3em] uppercase mt-4 text-center relative z-20">
+              Leave No Trace
+            </p>
+          </motion.div>
         </div>
+
+        {/* BUTTON CONTAINER */}
+        <motion.div
+          className="relative z-50 flex flex-col items-center gap-6 pb-32 md:pb-20" 
+          style={{ opacity: buttonOpacity, y: buttonY }}
+        >
+          <Link href="/dashboard/ghost?action=broadcast">
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.98 }}
+              className="group relative px-12 py-5 bg-white text-black rounded-full font-bold text-xl overflow-hidden glow-indigo cursor-pointer shadow-2xl shadow-indigo-500/20"
+            >
+              <span className="absolute inset-0 bg-gradient-to-r from-transparent via-black/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+              <span className="relative flex items-center gap-3">
+                <Zap className="w-6 h-6 fill-current" />
+                Start Transfer
+              </span>
+            </motion.button>
+          </Link>
+          
+          <p className="text-neutral-500 text-sm tracking-wide">
+            Zero-knowledge P2P transfer
+          </p>
+        </motion.div>
       </div>
     </section>
   );
 }
 
-// --- 3. BLOG GRID COMPONENT ---
-const POSTS = [
+// ============================================================
+// PARALLAX STATS COMPONENT (FIXED INFINITY SYMBOL)
+// ============================================================
+const stats = [
+  { value: "0", label: "Data Stored" },
+  { value: "0", label: "Logs Kept" },
+  { value: "∞", label: "Privacy" }, // We will detect this symbol below
+  { value: "256", label: "Bit Encryption" },
+];
+
+function ParallaxStats() {
+  const sectionRef = useRef<HTMLElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: sectionRef,
+    offset: ["start end", "end start"],
+  });
+
+  const y1 = useTransform(scrollYProgress, [0, 1], [100, -100]);
+  const y2 = useTransform(scrollYProgress, [0, 1], [50, -50]);
+  const opacity = useTransform(scrollYProgress, [0, 0.3, 0.7, 1], [0, 1, 1, 0]);
+
+  return (
+    <section ref={sectionRef} className="relative py-32 md:py-48 px-6 overflow-hidden">
+      {/* Background Parallax Text */}
+      <motion.div
+        style={{ y: y1 }}
+        className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
+      >
+        <span className="text-[30vw] font-black text-white/[0.02] tracking-tighter">
+          ZERO
+        </span>
+      </motion.div>
+
+      <motion.div style={{ y: y2, opacity }} className="relative z-10 max-w-6xl mx-auto">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-12">
+          {stats.map((stat, index) => (
+            <motion.div
+              key={stat.label}
+              initial={{ opacity: 0, y: 40 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: index * 0.1, duration: 0.6 }}
+              className="text-center flex flex-col items-center"
+            >
+              {/* LOGIC: If value is "∞", render the Icon. Otherwise, render Text. */}
+              {stat.value === "∞" ? (
+                <div className="h-16 md:h-24 flex items-center mb-4">
+                  <Infinity 
+                    size={80} 
+                    strokeWidth={2.5} // Thicker lines to match the bold text
+                    className="text-white icon-glow w-16 h-16 md:w-24 md:h-24" 
+                  />
+                </div>
+              ) : (
+                <div className="text-6xl md:text-8xl font-black tracking-tighter mb-4 text-glow">
+                  {stat.value}
+                </div>
+              )}
+
+              <div className="text-neutral-500 text-sm tracking-[0.3em] uppercase">
+                {stat.label}
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Separator Line */}
+        <motion.div
+          initial={{ scaleX: 0 }}
+          whileInView={{ scaleX: 1 }}
+          viewport={{ once: true }}
+          transition={{ duration: 1, delay: 0.4 }}
+          className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mt-24"
+        />
+
+        {/* Quote */}
+        <motion.blockquote
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.6 }}
+          className="text-center mt-24"
+        >
+          <p className="text-2xl md:text-4xl font-light text-neutral-500 italic max-w-4xl mx-auto leading-relaxed">
+            "The best way to keep a secret is to pretend there isn't one."
+          </p>
+          <cite className="block mt-8 text-sm text-neutral-600 tracking-wide uppercase not-italic">
+            — Margaret Atwood
+          </cite>
+        </motion.blockquote>
+      </motion.div>
+    </section>
+  );
+}
+// ============================================================
+// FEATURE SECTION COMPONENT
+// ============================================================
+const features = [
   {
-    id: 1,
-    title: "Building Scalable React Applications",
-    excerpt: "A deep dive into architectural patterns that help React applications grow without pain.",
-    date: "Dec 10, 2023",
-    category: "Engineering",
-    image: "https://images.unsplash.com/photo-1633356122544-f134324a6cee?q=80&w=800&auto=format&fit=crop",
+    icon: <Globe className="w-8 h-8 text-white" />,
+    title: "P2P Mesh Network",
+    description: "Data flows directly between devices using WebRTC. Your files never touch our servers. Pure peer-to-peer architecture.",
+    direction: "left" as const,
   },
   {
-    id: 2,
-    title: "Understanding Event-Driven Architecture",
-    excerpt: "How event-driven patterns can decouple services and improve system reliability.",
-    date: "Nov 25, 2023",
-    category: "Distributed Systems",
-    image: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=800&auto=format&fit=crop", 
+    icon: <Shield className="w-8 h-8 text-white" />,
+    title: "AES-256 Encryption",
+    description: "Military-grade encryption generated client-side. Even we cannot see what you're sending. Zero-knowledge by design.",
+    direction: "right" as const,
   },
   {
-    id: 3,
-    title: "Contributing to Your First OSS Project",
-    excerpt: "A practical guide to making meaningful contributions to open source software.",
-    date: "Jan 8, 2024",
-    category: "Open Source",
-    image: "https://images.unsplash.com/photo-1522071820081-009f0129c71c?q=80&w=800&auto=format&fit=crop",
+    icon: <Cpu className="w-8 h-8 text-white" />,
+    title: "Steganography Suite",
+    description: "Advanced tools to hide sensitive messages inside innocent-looking images. Invisible to the naked eye.",
+    direction: "left" as const,
   },
   {
-    id: 4,
-    title: "Building Distributed Systems with Rust",
-    excerpt: "An exploration of building fault-tolerant distributed systems using Rust and its async ecosystem.",
-    date: "Feb 15, 2024",
-    category: "Rust",
-    image: "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=800&auto=format&fit=crop",
+    icon: <Lock className="w-8 h-8 text-white" />,
+    title: "Ephemeral Tunnels",
+    description: "Connections exist only during transfer. Once complete, all traces are destroyed. No logs, no history, no evidence.",
+    direction: "right" as const,
   },
   {
-    id: 5,
-    title: "Zero-Knowledge Proofs Explained",
-    excerpt: "Understanding ZK-SNARKs and their applications in modern cryptography.",
-    date: "Jan 28, 2024",
-    category: "Cryptography",
-    image: "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?q=80&w=800&auto=format&fit=crop",
+    icon: <Fingerprint className="w-8 h-8 text-white" />,
+    title: "Zero Identity",
+    description: "No accounts required. No personal data collected. You remain completely anonymous throughout the process.",
+    direction: "left" as const,
   },
   {
-    id: 6,
-    title: "React Server Components Deep Dive",
-    excerpt: "A comprehensive guide to React Server Components and their impact on web performance.",
-    date: "Mar 01, 2024",
-    category: "Performance",
-    image: "https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=800&auto=format&fit=crop",
+    icon: <Wifi className="w-8 h-8 text-white" />,
+    title: "Offline Capable",
+    description: "Works on local networks without internet. Perfect for air-gapped environments and sensitive operations.",
+    direction: "right" as const,
   },
 ];
 
-function BlogGrid() {
+function FeatureCard({ 
+  icon, 
+  title, 
+  description, 
+  direction, 
+  index 
+}: { 
+  icon: React.ReactNode; 
+  title: string; 
+  description: string; 
+  direction: "left" | "right"; 
+  index: number;
+}) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: cardRef,
+    offset: ["start end", "center center"],
+  });
+
+  const x = useTransform(scrollYProgress, [0, 1], [direction === "left" ? -200 : 200, 0]);
+  const opacity = useTransform(scrollYProgress, [0, 0.5, 1], [0, 0.5, 1]);
+  const scale = useTransform(scrollYProgress, [0, 1], [0.8, 1]);
+
   return (
-    <section id="blog" className="py-24 px-4 md:px-6 bg-neutral-950">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-12">
-          <h2 className="text-3xl font-bold tracking-tight text-white">Latest Posts</h2>
-          <p className="text-neutral-400 hidden md:block">Technical deep dives and engineering insights.</p>
+    <motion.div
+      ref={cardRef}
+      style={{ x, opacity, scale }}
+      className="group relative p-8 md:p-12 rounded-3xl bg-neutral-950 border border-white/10 hover:border-white/20 transition-all duration-500 overflow-hidden"
+    >
+      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+      
+      <div className="relative z-10">
+        <div className="w-16 h-16 rounded-2xl bg-neutral-900 border border-white/10 flex items-center justify-center mb-8 group-hover:border-white/20 transition-colors">
+          {icon}
         </div>
+        
+        <h3 className="text-2xl md:text-3xl font-bold mb-4 tracking-tight">
+          {title}
+        </h3>
+        
+        <p className="text-neutral-400 text-lg leading-relaxed">
+          {description}
+        </p>
+      </div>
+      
+      <div className="absolute top-8 right-8 text-8xl font-black text-white/5 select-none">
+        0{index + 1}
+      </div>
+    </motion.div>
+  );
+}
 
-        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
-          {POSTS.map((post) => (
-            <Link
-              key={post.id}
-              href={`#`} // Just a placeholder link for the decoy
-              className="group relative flex flex-col rounded-xl border border-neutral-800 bg-neutral-900/50 overflow-hidden transition-all hover:border-neutral-700 hover:bg-neutral-900"
-            >
-              {/* IMAGE SECTION */}
-              <div className="aspect-video w-full overflow-hidden">
-                <img
-                  src={post.image}
-                  alt={post.title}
-                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                />
-              </div>
+function FeatureSection() {
+  const sectionRef = useRef<HTMLElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: sectionRef,
+    offset: ["start end", "end start"],
+  });
 
-              {/* CONTENT SECTION */}
-              <div className="flex flex-1 flex-col p-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="inline-flex items-center rounded-full bg-neutral-800 px-2.5 py-0.5 text-xs font-medium text-neutral-300">
-                    {post.category}
-                  </span>
-                  <span className="text-xs text-neutral-500">{post.date}</span>
-                </div>
-                
-                <h3 className="mb-2 text-xl font-semibold text-white group-hover:text-indigo-400 transition-colors">
-                  {post.title}
-                </h3>
-                <p className="mb-6 flex-1 text-sm text-neutral-400 leading-relaxed">
-                  {post.excerpt}
-                </p>
+  const headerY = useTransform(scrollYProgress, [0, 0.3], [100, 0]);
+  const headerOpacity = useTransform(scrollYProgress, [0, 0.2], [0, 1]);
 
-                <div className="flex items-center text-sm font-medium text-indigo-400">
-                  Read article
-                  <ArrowRight className="ml-1 h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </div>
-              </div>
-            </Link>
+  return (
+    <section ref={sectionRef} className="relative py-32 md:py-48 px-6">
+      <div className="max-w-6xl mx-auto">
+        <motion.div style={{ y: headerY, opacity: headerOpacity }} className="text-center mb-24 md:mb-32">
+          <motion.span
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            className="inline-block px-4 py-2 rounded-full border border-white/10 text-sm text-neutral-500 tracking-[0.3em] uppercase mb-6"
+          >
+            Protocol Features
+          </motion.span>
+          
+          <h2 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight">
+            Built for
+            <br />
+            <span className="text-neutral-500">the paranoid.</span>
+          </h2>
+        </motion.div>
+
+        <div className="grid md:grid-cols-2 gap-8 md:gap-12">
+          {features.map((feature, index) => (
+            <FeatureCard key={feature.title} {...feature} index={index} />
           ))}
         </div>
       </div>
@@ -274,35 +410,152 @@ function BlogGrid() {
   );
 }
 
-// --- 4. FOOTER COMPONENT ---
-function Footer() {
-  return (
-    <footer className="border-t border-neutral-800 py-12 px-4 bg-neutral-950">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-sm text-neutral-500">© 2025 Full Stack Engineer. All rights reserved.</p>
+// ============================================================
+// FOOTER COMPONENT
+// ============================================================
+function GhostFooter() {
+  const footerRef = useRef<HTMLElement>(null);
+  const { scrollYProgress } = useScroll({
+    target: footerRef,
+    offset: ["start end", "end end"],
+  });
 
-          <div className="flex items-center gap-6">
-            <a href="#" className="text-neutral-500 hover:text-white transition-colors"><span className="sr-only">GitHub</span>GitHub</a>
-            <a href="#" className="text-neutral-500 hover:text-white transition-colors"><span className="sr-only">Twitter</span>Twitter</a>
-            <a href="#" className="text-neutral-500 hover:text-white transition-colors"><span className="sr-only">LinkedIn</span>LinkedIn</a>
-          </div>
+  const y = useTransform(scrollYProgress, [0, 1], [100, 0]);
+  const opacity = useTransform(scrollYProgress, [0, 0.5], [0, 1]);
+  const scale = useTransform(scrollYProgress, [0, 1], [0.9, 1]);
+
+  return (
+    <footer ref={footerRef} className="relative py-32 md:py-48 px-6 border-t border-white/10 overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-t from-neutral-950 to-transparent opacity-50" />
+      
+      <motion.div
+        style={{ y, opacity, scale }}
+        className="relative z-10 max-w-6xl mx-auto flex flex-col items-center text-center"
+      >
+        <motion.div
+          initial={{ scale: 0 }}
+          whileInView={{ scale: 1 }}
+          viewport={{ once: true }}
+          transition={{ type: "spring", stiffness: 200, delay: 0.2 }}
+          className="w-24 h-24 rounded-3xl bg-neutral-900 border border-white/10 flex items-center justify-center mb-12"
+        >
+          <Ghost className="w-12 h-12 text-neutral-500" />
+        </motion.div>
+
+        <motion.h2
+          initial={{ opacity: 0, y: 40 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.8 }}
+          className="text-5xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-8"
+        >
+          GhostDrop
+        </motion.h2>
+
+        <motion.p
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.3 }}
+          className="text-xl md:text-2xl text-neutral-500 mb-12 max-w-2xl"
+        >
+          The protocol that doesn't exist.
+          <br />
+          For data that was never sent.
+        </motion.p>
+
+        <motion.a
+          href="https://github.com/swaraj1105/ghost-drop"
+          target="_blank"
+          rel="noopener noreferrer"
+          initial={{ opacity: 0, scale: 0.9 }}
+          whileInView={{ opacity: 1, scale: 1 }}
+          viewport={{ once: true }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.98 }}
+          transition={{ delay: 0.4 }}
+          className="group inline-flex items-center gap-4 px-8 py-4 rounded-full border border-emerald-500/30 bg-emerald-500/5 glow-emerald transition-all duration-300"
+        >
+          <Github className="w-5 h-5 text-emerald-400" />
+          <span className="text-lg font-medium text-white">Open Source</span>
+          <ExternalLink className="w-4 h-4 text-neutral-500 group-hover:text-white transition-colors" />
+        </motion.a>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          whileInView={{ opacity: 1 }}
+          viewport={{ once: true }}
+          transition={{ delay: 0.6 }}
+          className="flex flex-wrap items-center justify-center gap-8 mt-16 text-sm text-neutral-500"
+        >
+          <span>Protocol v2.0</span>
+          <span className="w-1 h-1 rounded-full bg-neutral-500" />
+          <span>MIT License</span>
+          <span className="w-1 h-1 rounded-full bg-neutral-500" />
+          <span>© 2026</span>
+        </motion.div>
+
+        <div className="absolute -bottom-20 left-1/2 -translate-x-1/2 text-[40vw] font-black text-white/[0.02] select-none pointer-events-none tracking-tighter">
+          G
         </div>
-      </div>
+      </motion.div>
     </footer>
   );
 }
 
-// --- 5. MAIN PAGE EXPORT ---
-export default function Home() {
-  return (
-    <div className="min-h-screen bg-neutral-950 font-sans selection:bg-indigo-500/30">
-      <Navbar />
-      <main>
-        <Hero />
-        <BlogGrid />
-      </main>
-      <Footer />
-    </div>
-  );
+// ============================================================
+// REQUIRED CSS STYLES (UPDATED WITH INTENSE GLOW)
+// ============================================================
+const CSS_STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+* {
+  box-sizing: border-box;
 }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #000;
+  color: #fff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Film grain noise overlay */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+}
+
+/* Glow effects */
+.glow-indigo {
+  box-shadow: 0 0 60px -10px rgba(99, 102, 241, 0.5),
+              0 0 100px -20px rgba(99, 102, 241, 0.3);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 40px -5px rgba(16, 185, 129, 0.6),
+              0 0 80px -10px rgba(16, 185, 129, 0.4);
+}
+
+/* --- NEW INTENSE WHITE BLOOM GLOW --- */
+.text-glow {
+  text-shadow:
+    0 0 10px rgba(255, 255, 255, 0.8),  /* Bright inner glow for definition */
+    0 0 25px rgba(255, 255, 255, 0.6),  /* Softer medium glow */
+    0 0 50px rgba(255, 255, 255, 0.4),  /* Wide bloom effect */
+    0 0 100px rgba(255, 255, 255, 0.2); /* Very wide atmospheric light */
+}
+
+/* Use drop-shadow for Icons */
+.icon-glow {
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8))
+          drop-shadow(0 0 25px rgba(255, 255, 255, 0.5))
+          drop-shadow(0 0 50px rgba(255, 255, 255, 0.3));
+}
+`;
+

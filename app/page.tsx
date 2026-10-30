@@ -174,7 +174,7 @@ function GhostHero() {
           </Link>
           
           <p className="text-neutral-500 text-sm tracking-wide">
-            Zero-knowledge P2P transfer
+            Encrypted peer-to-peer transfer
           </p>
         </motion.div>
       </div>
@@ -186,10 +186,10 @@ function GhostHero() {
 // PARALLAX STATS COMPONENT (FIXED INFINITY SYMBOL)
 // ============================================================
 const stats = [
-  { value: "0", label: "Data Stored" },
-  { value: "0", label: "Logs Kept" },
-  { value: "∞", label: "Privacy" }, // We will detect this symbol below
-  { value: "256", label: "Bit Encryption" },
+  { value: "0", label: "Files Stored" },
+  { value: "0", label: "Sign-ups" },
+  { value: "P2P", label: "Direct Transfer" },
+  { value: "LSB", label: "Steganography" },
 ];
 
 function ParallaxStats() {
@@ -266,7 +266,7 @@ function ParallaxStats() {
           className="text-center mt-24"
         >
           <p className="text-2xl md:text-4xl font-light text-neutral-500 italic max-w-4xl mx-auto leading-relaxed">
-            "The best way to keep a secret is to pretend there isn't one."
+            "The best way of keeping a secret is to pretend there isn't one."
           </p>
           <cite className="block mt-8 text-sm text-neutral-600 tracking-wide uppercase not-italic">
             — Margaret Atwood
@@ -282,38 +282,38 @@ function ParallaxStats() {
 const features = [
   {
     icon: <Globe className="w-8 h-8 text-white" />,
-    title: "P2P Mesh Network",
-    description: "Data flows directly between devices using WebRTC. Your files never touch our servers. Pure peer-to-peer architecture.",
+    title: "Peer-to-Peer Transfer",
+    description: "Files travel directly from one browser to another over WebRTC. They are never uploaded to, or stored on, our servers.",
     direction: "left" as const,
   },
   {
     icon: <Shield className="w-8 h-8 text-white" />,
-    title: "AES-256 Encryption",
-    description: "Military-grade encryption generated client-side. Even we cannot see what you're sending. Zero-knowledge by design.",
+    title: "Encrypted in Transit",
+    description: "WebRTC encrypts every transfer between the two devices, using its built-in DTLS encryption.",
     direction: "right" as const,
   },
   {
     icon: <Cpu className="w-8 h-8 text-white" />,
     title: "Steganography Suite",
-    description: "Advanced tools to hide sensitive messages inside innocent-looking images. Invisible to the naked eye.",
+    description: "Hide text messages inside ordinary-looking images, invisible to the naked eye. Bring your own cover image or generate one with AI.",
     direction: "left" as const,
   },
   {
     icon: <Lock className="w-8 h-8 text-white" />,
     title: "Ephemeral Tunnels",
-    description: "Connections exist only during transfer. Once complete, all traces are destroyed. No logs, no history, no evidence.",
+    description: "Rooms exist only while you're connected. When either side leaves, the room is deleted and the tunnel closes.",
     direction: "right" as const,
   },
   {
     icon: <Fingerprint className="w-8 h-8 text-white" />,
     title: "Zero Identity",
-    description: "No accounts required. No personal data collected. You remain completely anonymous throughout the process.",
+    description: "No sign-up, no accounts. GhostDrop never asks for your name, your email or a password.",
     direction: "left" as const,
   },
   {
     icon: <Wifi className="w-8 h-8 text-white" />,
-    title: "Offline Capable",
-    description: "Works on local networks without internet. Perfect for air-gapped environments and sensitive operations.",
+    title: "Instant Pairing",
+    description: "Share a 6-digit code or scan a QR code to connect two devices in seconds. Nothing to install.",
     direction: "right" as const,
   },
 ];
@@ -558,4 +558,3 @@ body {
           drop-shadow(0 0 50px rgba(255, 255, 255, 0.3));
 }
 `;
-

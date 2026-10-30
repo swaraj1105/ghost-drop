@@ -33,23 +33,114 @@ let metadata: { name: string, size: number, type: string } | null = null;
 let receivedBytes = 0;
 
 /**
+ * ROOM LIFETIME RULES
+ *
+ * A room ends when:
+ *   1. someone presses Terminate, or
+ *   2. someone refreshes the page, or
+ *   3. the other device stays gone for longer than GRACE_MS (it was closed).
+ *
+ * Briefly switching to another app (backgrounding) does NOT end the room: the
+ * link is allowed to drop and come back within the grace period.
+ *
+ * Why a timer? When an app is swiped away the browser gives the page no
+ * warning, and from the outside that looks the same as the app being
+ * backgrounded. The only reliable difference is time: a backgrounded app
+ * comes back, a closed one doesn't.
+ */
+const GRACE_MS = 60_000; // how long the other device may stay gone (60 seconds)
+
+/**
+ * Connection health, reported to the UI.
+ *  - "interrupted": the link dropped (e.g. the other phone was backgrounded). It may come back.
+ *  - "failed":      the link is down hard; it may still come back, but not for long.
+ *  - "connected":   the link came back after an interruption.
+ */
+export type ConnectionHealth = "connected" | "interrupted" | "failed";
+
+let stopWatching: (() => void) | null = null;
+
+/**
+ * Watches a peer connection. Reports drops/recoveries through onChange and, if
+ * the other device is still gone after GRACE_MS, calls onGiveUp (= treat it as closed).
+ * Returns a function that stops watching.
+ */
+function watchConnection(
+  conn: RTCPeerConnection,
+  onChange: ((health: ConnectionHealth) => void) | undefined,
+  onGiveUp: () => void
+) {
+  let wasInterrupted = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const stopTimer = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  const startTimer = () => {
+    stopTimer();
+    timer = setTimeout(() => {
+      timer = null;
+      // If THIS device is the one in the background, the other side didn't
+      // leave. Keep waiting until we're visible again instead of giving up.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        startTimer();
+        return;
+      }
+      onGiveUp();
+    }, GRACE_MS);
+  };
+
+  // Coming back to the app after being away gets a fresh grace window.
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "visible" && wasInterrupted) startTimer();
+  };
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", onVisibilityChange);
+  }
+
+  conn.oniceconnectionstatechange = () => {
+    const state = conn.iceConnectionState;
+    if (state === "disconnected" || state === "failed") {
+      // The grace period counts from the FIRST sign of trouble.
+      if (!wasInterrupted) startTimer();
+      wasInterrupted = true;
+      onChange?.(state === "failed" ? "failed" : "interrupted");
+    } else if ((state === "connected" || state === "completed") && wasInterrupted) {
+      // Came back in time: the room lives.
+      wasInterrupted = false;
+      stopTimer();
+      onChange?.("connected");
+    }
+  };
+
+  return () => {
+    stopTimer();
+    conn.oniceconnectionstatechange = null;
+    if (typeof document !== "undefined") {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    }
+  };
+}
+
+/**
  * 1. SENDER: Creates a Room
  */
 export const createRoom = async (
-  onChannelOpen: () => void, 
+  onChannelOpen: () => void,
   onFileReceived: (blob: Blob, name: string) => void,
-  onRoomDestroyed: () => void 
+  onRoomDestroyed: () => void,
+  onConnectionHealth?: (health: ConnectionHealth) => void
 ) => {
+  stopWatching?.();
   if (pc) pc.close();
   pc = new RTCPeerConnection(servers);
 
-  // --- NEW: Handle "Rude" Disconnections (Browser Close/Refresh) ---
-  pc.oniceconnectionstatechange = () => {
-    if (pc && (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed")) {
-        console.warn("Peer connection lost (ICE failure).");
-        onRoomDestroyed();
-    }
-  };
+  // A dropped link is a warning first; the room only ends if the other device stays gone.
+  stopWatching = watchConnection(pc, onConnectionHealth, onRoomDestroyed);
 
   dataChannel = pc.createDataChannel("ghost-drop");
   setupChannel(dataChannel, onChannelOpen, onFileReceived);
@@ -93,25 +184,22 @@ export const createRoom = async (
  * 2. RECEIVER: Joins a Room
  */
 export const joinRoom = async (
-  roomId: string, 
-  onChannelOpen: () => void, 
+  roomId: string,
+  onChannelOpen: () => void,
   onFileReceived: (blob: Blob, name: string) => void,
-  onRoomDestroyed: () => void 
+  onRoomDestroyed: () => void,
+  onConnectionHealth?: (health: ConnectionHealth) => void
 ) => {
   const roomRef = ref(db, `rooms/${roomId}`);
   const roomSnapshot = await get(roomRef);
   if (!roomSnapshot.exists()) throw new Error("Room not found");
 
+  stopWatching?.();
   if (pc) pc.close();
   pc = new RTCPeerConnection(servers);
 
-  // --- NEW: Handle "Rude" Disconnections (Browser Close/Refresh) ---
-  pc.oniceconnectionstatechange = () => {
-    if (pc && (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed" || pc.iceConnectionState === "closed")) {
-        console.warn("Host connection lost (ICE failure).");
-        onRoomDestroyed();
-    }
-  };
+  // A dropped link is a warning first; the room only ends if the other device stays gone.
+  stopWatching = watchConnection(pc, onConnectionHealth, onRoomDestroyed);
 
   pc.ondatachannel = (e) => {
     dataChannel = e.channel;
@@ -181,7 +269,11 @@ function setupChannel(channel: RTCDataChannel, onOpen: () => void, onFileReceive
  * 3. PUBLIC: Send File (Streaming Mode)
  */
 export const sendFile = async (file: File) => {
-  if (!dataChannel || dataChannel.readyState !== "open") return;
+  // Throw (don't silently return) so the UI can say "Transfer Interrupted"
+  // instead of "All Transfers Complete" when the link is down.
+  if (!dataChannel || dataChannel.readyState !== "open") {
+    throw new Error("Connection is not open");
+  }
 
   const meta = JSON.stringify({ name: file.name, size: file.size, type: file.type });
   dataChannel.send(meta);
@@ -207,6 +299,10 @@ export const sendFile = async (file: File) => {
 export const destroyRoom = async (roomId: string) => {
   if (!roomId) return;
   
+  // Stop the grace-period watcher so no timer outlives the room
+  stopWatching?.();
+  stopWatching = null;
+
   // Close local connections immediately
   if (pc) {
     pc.close();

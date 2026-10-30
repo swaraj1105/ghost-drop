@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { motion, useMotionTemplate, useMotionValue } from "framer-motion"; 
 import QRCode from "react-qr-code"; 
 import { Html5Qrcode } from "html5-qrcode";
-import { createRoom, joinRoom, sendFile, destroyRoom } from "@/lib/webrtcService";
+import { createRoom, joinRoom, sendFile, destroyRoom, type ConnectionHealth } from "@/lib/webrtcService";
 import { 
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
@@ -16,6 +16,29 @@ import {
 // --- 0. ANIMATION COMPONENTS ---
 
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+[]{}|;:,.<>?";
+
+// --- ROOM LIFETIME RULES ---
+// A room ends when someone presses Terminate, refreshes the page, or when the
+// other device stays gone past the grace period in webrtcService (= the app was
+// closed). Briefly switching to another app does NOT end it.
+//
+// To detect a refresh we remember the open room in sessionStorage, which
+// survives a reload of the same tab. When the page loads and finds a remembered
+// room, the previous page was refreshed, so we end it.
+const ACTIVE_ROOM_KEY = "ghostdrop_active_room";
+const rememberRoom = (id: string) => {
+  try { sessionStorage.setItem(ACTIVE_ROOM_KEY, id); } catch {}
+};
+const forgetRoom = () => {
+  try { sessionStorage.removeItem(ACTIVE_ROOM_KEY); } catch {}
+};
+
+// Message shown when the link to the other device has a problem (null = fine).
+const linkWarningFor = (health: ConnectionHealth): string | null => {
+  if (health === "connected") return null;
+  if (health === "interrupted") return "Connection interrupted. Waiting for the other device to come back...";
+  return "Connection lost. If the other device doesn't come back soon, this room will close automatically.";
+};
 
 function ScrambleText({ text, className }: { text: string, className?: string }) {
   const [displayText, setDisplayText] = useState("");
@@ -105,6 +128,7 @@ function GhostContent() {
   const [roomId, setRoomId] = useState("");
   const [status, setStatus] = useState("Initializing...");
   const [isConnected, setIsConnected] = useState(false);
+  const [linkWarning, setLinkWarning] = useState<string | null>(null);
   const [receivedFiles, setReceivedFiles] = useState<{name: string, data: string}[]>([]); 
 
   // --- SENDER STATE ---
@@ -160,23 +184,26 @@ function GhostContent() {
     }
   }, [searchParams]);
 
-  // --- 2. HANDLE BROWSER REFRESH/CLOSE ---
+  // --- 2. HANDLE PAGE REFRESH ---
+  // Refreshing ends the room. We do it on the NEXT page load (not in
+  // beforeunload) because a network call made while the page is dying often
+  // never completes. (A closed app can't clean up after itself; the other
+  // device ends the room once it has been gone past the grace period.)
   useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      isSelfDisconnecting.current = true;
-      if (roomId) {
-        destroyRoom(roomId);
-      }
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [roomId]);
+    let staleRoom: string | null = null;
+    try { staleRoom = sessionStorage.getItem(ACTIVE_ROOM_KEY); } catch {}
+    if (staleRoom) {
+      forgetRoom();
+      destroyRoom(staleRoom);
+    }
+  }, []);
 
 
   // --- HELPER: DISCONNECT LOGIC (FIXED) ---
   const handleDisconnect = async (showModal = false) => {
     // FIX: Lock immediately to prevent double-firing from destroyRoom callbacks
     isSelfDisconnecting.current = true;
+    forgetRoom();
 
     if (roomId) {
       await destroyRoom(roomId);
@@ -184,6 +211,7 @@ function GhostContent() {
     }
     setStatus("Idle");
     setIsConnected(false);
+    setLinkWarning(null);
     setReceivedFiles([]); 
     setFileQueue([]);     
     setTransferMode("IDLE");
@@ -348,11 +376,15 @@ function GhostContent() {
           setIsConnected(true);
         },
         (blob, name) => console.log("Received back:", name),
-        () => { 
-            console.log("Receiver disconnected.");
-            if (!isSelfDisconnecting.current) handleDisconnect(true); 
-        }
+        () => {
+            // The room ended: Terminate, refresh, or the other device stayed gone too long (closed).
+            console.log("Room ended.");
+            if (!isSelfDisconnecting.current) handleDisconnect(true);
+        },
+        // A dropped link first shows a warning; the room only ends if the other device doesn't return.
+        (health) => setLinkWarning(linkWarningFor(health))
       );
+      rememberRoom(id);
       setRoomId(id);
       setStatus("Waiting for Receiver...");
     } catch (e) {
@@ -377,11 +409,15 @@ function GhostContent() {
           const url = URL.createObjectURL(blob);
           setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
         },
-        () => { 
-            console.log("Host disconnected.");
-            if (!isSelfDisconnecting.current) handleDisconnect(true); 
-        }
+        () => {
+            // The room ended: Terminate, refresh, or the other device stayed gone too long (closed).
+            console.log("Room ended.");
+            if (!isSelfDisconnecting.current) handleDisconnect(true);
+        },
+        // A dropped link first shows a warning; the room only ends if the other device doesn't return.
+        (health) => setLinkWarning(linkWarningFor(health))
       );
+      rememberRoom(targetId);
     } catch (err) {
       alert("Invalid Room ID or Room no longer exists.");
       setStatus("Connection Failed");
@@ -763,6 +799,12 @@ function GhostContent() {
                         <button onClick={() => handleDisconnect(false)} className="flex items-center text-xs font-bold text-neutral-500 hover:text-white transition-colors uppercase tracking-wider"><ArrowLeft className="w-4 h-4 mr-1" /> Terminate</button>
                     </div>
 
+                    {linkWarning && (
+                        <div className="mb-6 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-mono relative z-10">
+                            {linkWarning}
+                        </div>
+                    )}
+
                     {!isConnected && (
                         <div className="flex-1 flex flex-col items-center justify-center space-y-8 animate-in fade-in relative z-10">
                             <h2 className="text-2xl font-bold text-white animate-pulse">Waiting for Receiver...</h2>
@@ -841,6 +883,12 @@ function GhostContent() {
                             {status}
                         </p>
                     </div>
+
+                    {linkWarning && (
+                        <div className="mb-6 px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-mono relative z-10">
+                            {linkWarning}
+                        </div>
+                    )}
 
                     {!isConnected ? (
                         <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-in fade-in relative z-10">

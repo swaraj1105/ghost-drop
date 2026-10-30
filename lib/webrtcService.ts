@@ -6,8 +6,8 @@ const CHUNK_SIZE = 16384; // 16KB chunks
 
 // 🔴 TODO: PASTE YOUR METERED KEYS HERE
 const turnConfig = {
-  username: "PASTE_YOUR_USERNAME_HERE",
-  credential: "PASTE_YOUR_PASSWORD_HERE",
+  username: process.env.NEXT_PUBLIC_METERED_USERNAME || "",
+  credential: process.env.NEXT_PUBLIC_METERED_PASSWORD || "",
   urls: [
     "stun:stun.relay.metered.ca:80",
     "turn:global.turn.metered.ca:80?transport=udp",

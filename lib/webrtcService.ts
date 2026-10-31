@@ -1,27 +1,52 @@
 import { db } from "./firebase";
-import { ref, set, onValue, push, child, get, remove } from "firebase/database";
+import { ref, set, onValue, onChildAdded, push, child, get, off, remove } from "firebase/database";
 
 // --- CONFIGURATION ---
 const CHUNK_SIZE = 16384; // 16KB chunks
 
-// ✅ SECURED: Credentials pulled from Vercel Environment Variables
-const turnConfig = {
-  username: process.env.NEXT_PUBLIC_METERED_USERNAME || "",
-  credential: process.env.NEXT_PUBLIC_METERED_PASSWORD || "",
-  urls: [
-    "turn:global.turn.metered.ca:443?transport=tcp",
-    "turn:global.turn.metered.ca:80?transport=udp",
-    "stun:stun.relay.metered.ca:80",
-    "turn:global.turn.metered.ca:80?transport=tcp"
-    
-  ]
-};
+// --- RELAY (TURN) SERVER ---
+// Two devices on different networks (e.g. a phone on mobile data and a laptop
+// on Wi-Fi) usually can't reach each other directly. A TURN server relays the
+// traffic for them. Without a working one, those connections fail.
+//
+// Set these in Vercel (Project > Settings > Environment Variables) and redeploy:
+//   NEXT_PUBLIC_METERED_USERNAME
+//   NEXT_PUBLIC_METERED_PASSWORD
+// Hostnames below are the ones Metered documents (global.relay.metered.ca).
+const TURN_USERNAME = process.env.NEXT_PUBLIC_METERED_USERNAME;
+const TURN_PASSWORD = process.env.NEXT_PUBLIC_METERED_PASSWORD;
 
-const servers = {
-  iceServers: [
-    { urls: ["stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302"] },
-    turnConfig
-  ],
+const iceServers: RTCIceServer[] = [
+  {
+    urls: [
+      "stun:stun.relay.metered.ca:80",
+      "stun:stun1.l.google.com:19302",
+      "stun:stun2.l.google.com:19302",
+    ],
+  },
+];
+
+if (TURN_USERNAME && TURN_PASSWORD) {
+  iceServers.push({
+    urls: [
+      "turn:global.relay.metered.ca:80",
+      "turn:global.relay.metered.ca:80?transport=tcp",
+      "turn:global.relay.metered.ca:443",
+      "turns:global.relay.metered.ca:443?transport=tcp", // TLS on 443: gets through strict firewalls
+    ],
+    username: TURN_USERNAME,
+    credential: TURN_PASSWORD,
+  });
+} else {
+  // Don't crash: browsers refuse to start a connection if a TURN entry has no credentials.
+  console.warn(
+    "GhostDrop: TURN credentials are missing (NEXT_PUBLIC_METERED_USERNAME / NEXT_PUBLIC_METERED_PASSWORD). " +
+    "Connections between devices on different networks will probably fail."
+  );
+}
+
+const servers: RTCConfiguration = {
+  iceServers,
   iceCandidatePoolSize: 10,
 };
 
@@ -34,6 +59,43 @@ let metadata: { name: string, size: number, type: string } | null = null;
 let receivedBytes = 0;
 
 /**
+ * NETWORK CANDIDATES (how two devices find a path to each other)
+ *
+ * Each device publishes "candidates" (possible network addresses) through
+ * Firebase. The other device must add them to its connection, but the browser
+ * REJECTS a candidate that arrives before the other side's description (the
+ * offer/answer) has been applied. The receiver publishes its candidates just
+ * BEFORE its answer, so the sender sees candidates first. If those were thrown
+ * away, the sender would never learn where to reach the receiver, and a device
+ * behind a strict NAT (typically a phone on mobile data) could not connect.
+ *
+ * So: hold early candidates here, and add them as soon as the description is set.
+ */
+let pendingCandidates: RTCIceCandidateInit[] = [];
+
+function addRemoteCandidate(candidate: RTCIceCandidateInit | null) {
+  if (!pc || !candidate) return;
+  if (!pc.remoteDescription) {
+    pendingCandidates.push(candidate);
+    return;
+  }
+  pc.addIceCandidate(candidate).catch((e) => console.warn("Could not add ICE candidate:", e));
+}
+
+function flushPendingCandidates() {
+  const queued = pendingCandidates;
+  pendingCandidates = [];
+  queued.forEach(addRemoteCandidate);
+}
+
+// Shows in the browser console when a STUN/TURN server can't be used.
+// 701 = couldn't reach that server (wrong hostname, blocked port), 401 = wrong credentials.
+function logIceServerError(e: Event) {
+  const err = e as RTCPeerConnectionIceErrorEvent;
+  console.warn(`ICE server problem: ${err.url} -> ${err.errorCode} ${err.errorText}`);
+}
+
+/**
  * ROOM LIFETIME RULES
  *
  * A room ends when:
@@ -43,10 +105,23 @@ let receivedBytes = 0;
  *
  * Briefly switching to another app (backgrounding) does NOT end the room: the
  * link is allowed to drop and come back within the grace period.
+ *
+ * Why a timer? When an app is swiped away the browser gives the page no
+ * warning, and from the outside that looks the same as the app being
+ * backgrounded. The only reliable difference is time: a backgrounded app
+ * comes back, a closed one doesn't.
  */
 const GRACE_MS = 60_000; // how long the other device may stay gone (60 seconds)
 
-export type ConnectionHealth = "connected" | "interrupted" | "failed";
+/**
+ * Connection health, reported to the UI.
+ *  - "interrupted": the link dropped (e.g. the other phone was backgrounded). It may come back.
+ *  - "failed":      the link is down hard; it may still come back, but not for long.
+ *  - "connected":   the link came back after an interruption.
+ *  - "unreachable": the two devices never managed to connect at all (usually
+ *                   because their networks block direct links and no relay worked).
+ */
+export type ConnectionHealth = "connected" | "interrupted" | "failed" | "unreachable";
 
 let stopWatching: (() => void) | null = null;
 
@@ -61,6 +136,7 @@ function watchConnection(
   onGiveUp: () => void
 ) {
   let wasInterrupted = false;
+  let everConnected = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 
   const stopTimer = () => {
@@ -94,6 +170,15 @@ function watchConnection(
 
   conn.oniceconnectionstatechange = () => {
     const state = conn.iceConnectionState;
+    if (state === "connected" || state === "completed") everConnected = true;
+
+    // Never connected in the first place: there is no "other device coming back"
+    // to wait for, so don't run the grace timer. Just tell the user.
+    if (state === "failed" && !everConnected) {
+      onChange?.("unreachable");
+      return;
+    }
+
     if (state === "disconnected" || state === "failed") {
       // The grace period counts from the FIRST sign of trouble.
       if (!wasInterrupted) startTimer();
@@ -127,6 +212,7 @@ export const createRoom = async (
 ) => {
   stopWatching?.();
   if (pc) pc.close();
+  pendingCandidates = [];
   pc = new RTCPeerConnection(servers);
 
   // A dropped link is a warning first; the room only ends if the other device stays gone.
@@ -140,31 +226,35 @@ export const createRoom = async (
   const callerCandidatesRef = child(roomRef, "callerCandidates");
 
   pc.onicecandidate = (e) => {
-    if (e.candidate) push(callerCandidatesRef, e.candidate.toJSON());
+    if (e.candidate) {
+      console.log(`ICE candidate found: ${e.candidate.type}`); // "relay" = the TURN server works
+      push(callerCandidatesRef, e.candidate.toJSON());
+    }
   };
+  pc.onicecandidateerror = logIceServerError;
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
-  await set(roomRef, { offer: { sdp: offer.sdp, type: offer.type } });
+  // Write ONLY the offer node. (Replacing the whole room would wipe out any
+  // candidates that were already published.)
+  await set(child(roomRef, "offer"), { sdp: offer.sdp, type: offer.type });
 
-  // ✅ FIXED: Listen for the Answer first, THEN listen for candidates.
-  // This prevents the mobile race condition where candidates arrive before the answer.
   onValue(child(roomRef, "answer"), async (snapshot) => {
     const data = snapshot.val();
     if (pc && pc.signalingState === "have-local-offer" && data) {
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(data));
-        
-        // Now that RemoteDescription is set, it is safe to process ICE candidates
-        onValue(child(roomRef, "calleeCandidates"), (candSnap) => {
-          candSnap.forEach((c) => {
-            pc?.addIceCandidate(new RTCIceCandidate(c.val())).catch(e => {});
-          });
-        });
-      } catch (err) {
-        console.warn("Ignored duplicate answer or error", err);
+        // Now that the answer is applied, add the candidates that arrived early.
+        flushPendingCandidates();
+      } catch (e) {
+        console.log("Ignore duplicate answer");
       }
     }
+  });
+
+  // onChildAdded delivers each candidate exactly once, in order.
+  onChildAdded(child(roomRef, "calleeCandidates"), (snapshot) => {
+    addRemoteCandidate(snapshot.val());
   });
 
   // Watch if the room gets destroyed (by Receiver via Firebase)
@@ -193,8 +283,10 @@ export const joinRoom = async (
 
   stopWatching?.();
   if (pc) pc.close();
+  pendingCandidates = [];
   pc = new RTCPeerConnection(servers);
 
+  // A dropped link is a warning first; the room only ends if the other device stays gone.
   stopWatching = watchConnection(pc, onConnectionHealth, onRoomDestroyed);
 
   pc.ondatachannel = (e) => {
@@ -204,18 +296,21 @@ export const joinRoom = async (
 
   const calleeCandidatesRef = child(roomRef, "calleeCandidates");
   pc.onicecandidate = (e) => {
-    if (e.candidate) push(calleeCandidatesRef, e.candidate.toJSON());
+    if (e.candidate) {
+      console.log(`ICE candidate found: ${e.candidate.type}`); // "relay" = the TURN server works
+      push(calleeCandidatesRef, e.candidate.toJSON());
+    }
   };
+  pc.onicecandidateerror = logIceServerError;
 
   await pc.setRemoteDescription(new RTCSessionDescription(roomSnapshot.val().offer));
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   await set(child(roomRef, "answer"), { sdp: answer.sdp, type: answer.type });
 
-  onValue(child(roomRef, "callerCandidates"), (snapshot) => {
-    snapshot.forEach((c) => {
-      pc?.addIceCandidate(new RTCIceCandidate(c.val())).catch(e => {});
-    });
+  // The offer is already applied here, so these are added straight away.
+  onChildAdded(child(roomRef, "callerCandidates"), (snapshot) => {
+    addRemoteCandidate(snapshot.val());
   });
 
   // Watch for Room Destruction (via Firebase)
@@ -265,6 +360,8 @@ function setupChannel(channel: RTCDataChannel, onOpen: () => void, onFileReceive
  * 3. PUBLIC: Send File (Streaming Mode)
  */
 export const sendFile = async (file: File) => {
+  // Throw (don't silently return) so the UI can say "Transfer Interrupted"
+  // instead of "All Transfers Complete" when the link is down.
   if (!dataChannel || dataChannel.readyState !== "open") {
     throw new Error("Connection is not open");
   }
@@ -296,6 +393,7 @@ export const destroyRoom = async (roomId: string) => {
   // Stop the grace-period watcher so no timer outlives the room
   stopWatching?.();
   stopWatching = null;
+  pendingCandidates = [];
 
   // Close local connections immediately
   if (pc) {

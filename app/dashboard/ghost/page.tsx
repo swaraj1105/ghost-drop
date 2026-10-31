@@ -36,6 +36,7 @@ const forgetRoom = () => {
 // Message shown when the link to the other device has a problem (null = fine).
 const linkWarningFor = (health: ConnectionHealth): string | null => {
   if (health === "connected") return null;
+  if (health === "unreachable") return "Couldn't connect to the other device. Their network may be blocking direct connections. Press Terminate and try again, or switch one device to a different network (for example Wi-Fi).";
   if (health === "interrupted") return "Connection interrupted. Waiting for the other device to come back...";
   return "Connection lost. If the other device doesn't come back soon, this room will close automatically.";
 };

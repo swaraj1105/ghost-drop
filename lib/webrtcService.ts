@@ -3,6 +3,8 @@ import { ref, set, onValue, onChildAdded, push, child, get, off, remove } from "
 
 // --- CONFIGURATION ---
 const CHUNK_SIZE = 16384; // 16KB chunks
+const MAX_BUFFERED = 4 * 1024 * 1024; // pause sending when more than 4 MB is waiting to go out
+const RESUME_BELOW = 1 * 1024 * 1024; // ...and carry on once that has drained below 1 MB
 
 // --- RELAY (TURN) SERVER ---
 // Two devices on different networks (e.g. a phone on mobile data and a laptop
@@ -325,6 +327,10 @@ export const joinRoom = async (
  * HELPER: Handle Data Stream
  */
 function setupChannel(channel: RTCDataChannel, onOpen: () => void, onFileReceived: (blob: Blob, name: string) => void) {
+  // Some browsers deliver binary data as a Blob by default; the receiving code
+  // below expects an ArrayBuffer, so say so explicitly.
+  channel.binaryType = "arraybuffer";
+
   channel.onopen = () => {
     console.log("👻 TUNNEL OPEN");
     onOpen();
@@ -362,27 +368,70 @@ function setupChannel(channel: RTCDataChannel, onOpen: () => void, onFileReceive
 export const sendFile = async (file: File) => {
   // Throw (don't silently return) so the UI can say "Transfer Interrupted"
   // instead of "All Transfers Complete" when the link is down.
-  if (!dataChannel || dataChannel.readyState !== "open") {
+  const channel = dataChannel;
+  if (!channel || channel.readyState !== "open") {
     throw new Error("Connection is not open");
   }
 
   const meta = JSON.stringify({ name: file.name, size: file.size, type: file.type });
-  dataChannel.send(meta);
+  channel.send(meta);
 
   let offset = 0;
   while (offset < file.size) {
-    const slice = file.slice(offset, offset + CHUNK_SIZE);
-    const buffer = await slice.arrayBuffer();
-    
-    // Backpressure control: Don't flood the channel
-    if (dataChannel.bufferedAmount > 16 * 1024 * 1024) {
-        await new Promise(r => setTimeout(r, 100));
+    // Backpressure: reading a file is far faster than the network can carry it,
+    // so the channel's send buffer fills up. If it overflows (browsers cap it at
+    // about 16 MB) the browser closes the channel and the transfer dies.
+    // So pause here, and carry on only once the buffer has drained.
+    if (channel.bufferedAmount > MAX_BUFFERED) {
+      await waitForBufferBelow(channel, RESUME_BELOW);
     }
-    
-    dataChannel.send(buffer);
+
+    const buffer = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+    channel.send(buffer);
     offset += CHUNK_SIZE;
   }
+
+  // Everything has been handed to the channel, but it may still be queued.
+  // Wait until it has really left before reporting success, otherwise a
+  // "complete" message could appear while the end of the file is still on its way.
+  await waitForBufferBelow(channel, 0);
 };
+
+/**
+ * Resolves once the channel's send buffer is at or below `limit` bytes.
+ * Rejects if the channel closes first, so the caller can report an interrupted transfer.
+ */
+function waitForBufferBelow(channel: RTCDataChannel, limit: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (channel.readyState !== "open") {
+      reject(new Error("Connection closed during transfer"));
+      return;
+    }
+    if (channel.bufferedAmount <= limit) {
+      resolve();
+      return;
+    }
+
+    const cleanup = () => {
+      channel.removeEventListener("bufferedamountlow", onLow);
+      channel.removeEventListener("close", onClosed);
+      channel.removeEventListener("error", onClosed);
+    };
+    const onLow = () => {
+      cleanup();
+      resolve();
+    };
+    const onClosed = () => {
+      cleanup();
+      reject(new Error("Connection closed during transfer"));
+    };
+
+    channel.bufferedAmountLowThreshold = limit;
+    channel.addEventListener("bufferedamountlow", onLow);
+    channel.addEventListener("close", onClosed);
+    channel.addEventListener("error", onClosed);
+  });
+}
 
 /**
  * 4. CLEANUP: Self-Destruct Room

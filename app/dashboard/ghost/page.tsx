@@ -761,9 +761,9 @@ function GhostContent() {
           </div>
           <button 
             onClick={() => setShowAboutModal(true)}
-            className="flex items-center gap-2 text-sm font-medium text-neutral-400 hover:text-white transition-colors bg-neutral-900/50 px-4 py-2 rounded-lg border border-white/5 hover:border-white/10"
+            className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-full border border-white/10 bg-neutral-900/40 text-neutral-300 hover:text-white hover:border-indigo-500/40 transition-colors"
           >
-            <Info className="w-4 h-4" /> About / How to Use
+            <Info className="w-4 h-4" /> About
           </button>
         </nav>
 

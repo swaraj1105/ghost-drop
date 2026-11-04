@@ -10,7 +10,7 @@ import {
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
   Copy, Check, ArrowLeft, FileUp, Download, ShieldCheck,
-  AlertTriangle, X, Loader2, QrCode, Share2, Terminal, ScanLine, Sparkles, RefreshCw
+  AlertTriangle, X, Loader2, QrCode, Share2, Terminal, ScanLine, Sparkles, RefreshCw, Info
 } from "lucide-react";
 
 // --- 0. ANIMATION COMPONENTS ---
@@ -18,13 +18,6 @@ import {
 const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+[]{}|;:,.<>?";
 
 // --- ROOM LIFETIME RULES ---
-// A room ends when someone presses Terminate, refreshes the page, or when the
-// other device stays gone past the grace period in webrtcService (= the app was
-// closed). Briefly switching to another app does NOT end it.
-//
-// To detect a refresh we remember the open room in sessionStorage, which
-// survives a reload of the same tab. When the page loads and finds a remembered
-// room, the previous page was refreshed, so we end it.
 const ACTIVE_ROOM_KEY = "ghostdrop_active_room";
 const rememberRoom = (id: string) => {
   try { sessionStorage.setItem(ACTIVE_ROOM_KEY, id); } catch {}
@@ -36,9 +29,9 @@ const forgetRoom = () => {
 // Message shown when the link to the other device has a problem (null = fine).
 const linkWarningFor = (health: ConnectionHealth): string | null => {
   if (health === "connected") return null;
-  if (health === "unreachable") return "Couldn't connect to the other device. Their network may be blocking direct connections. Press Terminate and try again, or switch one device to a different network (for example Wi-Fi).";
+  if (health === "unreachable") return "Couldn't connect to the other device. Their network may be blocking direct connections. Press Close Connection and try again, or switch one device to a different network (for example Wi-Fi).";
   if (health === "interrupted") return "Connection interrupted. Waiting for the other device to come back...";
-  return "Connection lost. If the other device doesn't come back soon, this room will close automatically.";
+  return "Connection lost. If the other device doesn't come back soon, this connection will close automatically.";
 };
 
 function ScrambleText({ text, className }: { text: string, className?: string }) {
@@ -114,6 +107,7 @@ function GhostContent() {
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<"GHOST_DROP" | "STEGANOGRAPHY">("GHOST_DROP");
   const [transferMode, setTransferMode] = useState<"IDLE" | "SEND" | "RECEIVE">("IDLE");
+  const [showAboutModal, setShowAboutModal] = useState(false);
 
   // --- MOUSE SPOTLIGHT LOGIC ---
   const mouseX = useMotionValue(0);
@@ -163,7 +157,6 @@ function GhostContent() {
   const [isGenerating, setIsGenerating] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // --- CYBERPUNK PROMPTS ---
   const CYBER_PROMPTS = [
     "Cyberpunk city street at night, neon rain, blade runner style",
     "Abstract digital data stream, matrix code background, green and black",
@@ -177,7 +170,6 @@ function GhostContent() {
     setAiPrompt(random);
   };
 
-  // --- AUTO-START LOGIC ---
   useEffect(() => {
     const action = searchParams.get("action");
     if (action === "broadcast" && transferMode === "IDLE") {
@@ -185,11 +177,6 @@ function GhostContent() {
     }
   }, [searchParams]);
 
-  // --- 2. HANDLE PAGE REFRESH ---
-  // Refreshing ends the room. We do it on the NEXT page load (not in
-  // beforeunload) because a network call made while the page is dying often
-  // never completes. (A closed app can't clean up after itself; the other
-  // device ends the room once it has been gone past the grace period.)
   useEffect(() => {
     let staleRoom: string | null = null;
     try { staleRoom = sessionStorage.getItem(ACTIVE_ROOM_KEY); } catch {}
@@ -199,10 +186,7 @@ function GhostContent() {
     }
   }, []);
 
-
-  // --- HELPER: DISCONNECT LOGIC (FIXED) ---
   const handleDisconnect = async (showModal = false) => {
-    // FIX: Lock immediately to prevent double-firing from destroyRoom callbacks
     isSelfDisconnecting.current = true;
     forgetRoom();
 
@@ -219,14 +203,13 @@ function GhostContent() {
     if (showModal) setShowExitModal(true);
   };
 
-  // --- 3. SOFT BACK BUTTON (Intercepts Back Navigation) ---
   useEffect(() => {
     if (transferMode === "SEND" || transferMode === "RECEIVE") {
       window.history.pushState({ ghostMode: true }, "", window.location.href);
 
       const handlePopState = (event: PopStateEvent) => {
         event.preventDefault(); 
-        handleDisconnect(false); // Clean disconnect, no error modal
+        handleDisconnect(false); 
       };
 
       window.addEventListener("popstate", handlePopState);
@@ -237,8 +220,6 @@ function GhostContent() {
     }
   }, [transferMode]);
 
-
-  // --- REST OF HELPER FUNCTIONS ---
   const copyToClipboard = () => {
     if (!roomId) return;
     navigator.clipboard.writeText(roomId);
@@ -253,15 +234,12 @@ function GhostContent() {
     setTimeout(() => setIsDecodedCopied(false), 2000);
   };
 
-  // --- AI GENERATOR ---
   const generateAiImage = async () => {
     if (!aiPrompt) return;
     setIsGenerating(true);
     setSelectedImage(null);
 
     try {
-        console.log("Requesting Secure AI Generation...");
-        
         const response = await fetch("/api/generate-image", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -274,7 +252,6 @@ function GhostContent() {
         await processAndSetImage(blob, `secure_ai_${Date.now()}.png`);
 
     } catch (err) {
-        console.warn("Internet/API Error. Switching to Offline Entropy Mode.");
         alert("Network unreachable. Switching to Secure Offline Mode.");
         
         const canvas = document.createElement("canvas");
@@ -302,7 +279,6 @@ function GhostContent() {
     }
   };
 
-  // --- REUSABLE PROCESSOR ---
   const processAndSetImage = async (blob: Blob, name: string) => {
       const imgBitmap = await createImageBitmap(blob);
       const canvas = document.createElement('canvas');
@@ -333,7 +309,6 @@ function GhostContent() {
       }, 'image/png');
   };
 
-  // --- WEBRTC ACTIONS ---
   const handleQueueFiles = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setFileQueue(prev => [...prev, ...Array.from(e.target.files!)]);
@@ -351,10 +326,10 @@ function GhostContent() {
     try {
       for (let i = 0; i < fileQueue.length; i++) {
         const file = fileQueue[i];
-        setStatus(`Streaming [${i + 1}/${fileQueue.length}]: ${file.name}...`);
+        setStatus(`Sending [${i + 1}/${fileQueue.length}]: ${file.name}...`);
         await sendFile(file);
       }
-      setStatus("All Transfers Complete.");
+      setStatus("All Files Sent.");
       setFileQueue([]); 
       setShowToast(true);
       setTimeout(() => setShowToast(false), 1500);
@@ -368,26 +343,23 @@ function GhostContent() {
 
   const startBroadcast = async () => {
     setTransferMode("SEND");
-    setStatus("Generating Secure Frequency...");
+    setStatus("Generating Code...");
     isSelfDisconnecting.current = false;
     try {
       const id = await createRoom(
         () => {
-          setStatus("Peer Connected. Tunnel Open.");
+          setStatus("Connected! Ready to share.");
           setIsConnected(true);
         },
         (blob, name) => console.log("Received back:", name),
         () => {
-            // The room ended: Terminate, refresh, or the other device stayed gone too long (closed).
-            console.log("Room ended.");
             if (!isSelfDisconnecting.current) handleDisconnect(true);
         },
-        // A dropped link first shows a warning; the room only ends if the other device doesn't return.
         (health) => setLinkWarning(linkWarningFor(health))
       );
       rememberRoom(id);
       setRoomId(id);
-      setStatus("Waiting for Receiver...");
+      setStatus("Waiting for someone to connect...");
     } catch (e) {
       setStatus("Connection Error");
     }
@@ -402,25 +374,22 @@ function GhostContent() {
       await joinRoom(
         targetId,
         () => {
-          setStatus("Secure Tunnel Established. Listening...");
+          setStatus("Connected! Waiting for files...");
           setIsConnected(true);
         },
         (blob, fileName) => {
-          setStatus("Data Fragment Received.");
+          setStatus("Receiving file...");
           const url = URL.createObjectURL(blob);
           setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
         },
         () => {
-            // The room ended: Terminate, refresh, or the other device stayed gone too long (closed).
-            console.log("Room ended.");
             if (!isSelfDisconnecting.current) handleDisconnect(true);
         },
-        // A dropped link first shows a warning; the room only ends if the other device doesn't return.
         (health) => setLinkWarning(linkWarningFor(health))
       );
       rememberRoom(targetId);
     } catch (err) {
-      alert("Invalid Room ID or Room no longer exists.");
+      alert("Invalid Code or Connection no longer exists.");
       setStatus("Connection Failed");
     }
   };
@@ -494,7 +463,7 @@ function GhostContent() {
                                 await navigator.share({
                                     files: [file],
                                     title: "GhostDrop Access Code",
-                                    text: `Scan this QR to join my secure channel. Code: ${roomId}`
+                                    text: `Scan this QR to connect to my device. Code: ${roomId}`
                                 });
                                 return;
                             }
@@ -612,7 +581,7 @@ function GhostContent() {
                  }
                  ctx.putImageData(imageData, 0, 0);
                  const link = document.createElement("a");
-                 link.download = "secure_artifact.png";
+                 link.download = "secure_image_message.png";
                  link.href = canvas.toDataURL("image/png");
                  link.click();
              } else {
@@ -637,7 +606,7 @@ function GhostContent() {
 
                  const finalMessage = xorEncrypt(rawText, ENCRYPTION_KEY);
                  if (/[\x00-\x08\x0E-\x1F]/.test(finalMessage)) {
-                     setDecodedMessage("⚠️ Error: No valid GhostDrop signature found.");
+                     setDecodedMessage("⚠️ Error: No hidden message found in this image.");
                  } else {
                      setDecodedMessage(finalMessage);
                  }
@@ -674,6 +643,51 @@ function GhostContent() {
         }}
       />
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] pointer-events-none z-0" />
+
+      {/* --- ABOUT MODAL --- */}
+      {showAboutModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300 p-4">
+          <div className="bg-neutral-900 border border-white/10 p-8 rounded-3xl max-w-lg w-full shadow-2xl relative overflow-hidden">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <Info className="w-5 h-5 text-indigo-400" /> About GhostDrop
+              </h3>
+              <button onClick={() => setShowAboutModal(false)} className="text-neutral-500 hover:text-white transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <p className="text-neutral-300 text-sm leading-relaxed mb-6">
+              GhostDrop is a secure, direct device-to-device file sharing tool. Your files travel directly between devices—nothing is ever stored on any servers.
+            </p>
+            
+            <div className="space-y-6">
+              <div>
+                <h4 className="font-bold text-white mb-2 text-sm flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-indigo-400"/> How to Send Files
+                </h4>
+                <ol className="text-sm text-neutral-400 space-y-2 list-decimal list-inside">
+                  <li>Click <strong>Send Files</strong> to generate a secure code.</li>
+                  <li>Share the 6-digit code (or QR) with the receiver.</li>
+                  <li>Select the files you want to share and send them.</li>
+                </ol>
+              </div>
+              <div>
+                <h4 className="font-bold text-white mb-2 text-sm flex items-center gap-2">
+                  <Download className="w-4 h-4 text-violet-400"/> How to Receive Files
+                </h4>
+                <ol className="text-sm text-neutral-400 space-y-2 list-decimal list-inside">
+                  <li>Click <strong>Receive Files</strong>.</li>
+                  <li>Enter the 6-digit code provided by the sender.</li>
+                  <li>Wait for the files to arrive and save them.</li>
+                </ol>
+              </div>
+            </div>
+            
+            <button onClick={() => setShowAboutModal(false)} className="mt-8 w-full bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-3 rounded-xl transition-all">Got it</button>
+          </div>
+        </div>
+      )}
 
       {/* --- SCANNER MODAL --- */}
       {isScanning && (
@@ -714,8 +728,8 @@ function GhostContent() {
               <div className="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center text-red-500 mb-2">
                 <AlertTriangle size={24} />
               </div>
-              <h3 className="text-xl font-bold text-white">Connection Terminated</h3>
-              <p className="text-neutral-400 text-sm">The connection was terminated by the peer.</p>
+              <h3 className="text-xl font-bold text-white">Connection Closed</h3>
+              <p className="text-neutral-400 text-sm">The connection was closed by the other device.</p>
               <button onClick={() => setShowExitModal(false)} className="mt-4 w-full bg-red-600 hover:bg-red-500 text-white font-medium py-3 rounded-xl transition-all">Back</button>
             </div>
           </div>
@@ -727,35 +741,37 @@ function GhostContent() {
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
           <div className="bg-neutral-900 border border-emerald-500 text-white px-6 py-3 rounded-full shadow-[0_0_20px_rgba(16,185,129,0.3)] flex items-center gap-3">
              <div className="bg-emerald-500 rounded-full p-1"><Check size={14} className="text-black stroke-[3]" /></div>
-             <span className="font-medium tracking-wide text-sm">Payload Delivered</span>
+             <span className="font-medium tracking-wide text-sm">Files Sent Successfully</span>
           </div>
         </div>
       )}
 
       <div className="relative z-10 max-w-5xl mx-auto p-6 md:p-12 space-y-8">
         
-        {/* --- HEADER --- */}
-        <header className="flex items-center justify-between pb-8 border-b border-white/5">
+        {/* --- NAVBAR --- */}
+        <nav className="flex items-center justify-between pb-6 border-b border-white/5 mb-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-tr from-indigo-600 to-violet-600 rounded-xl shadow-lg flex items-center justify-center border border-white/10">
               <ShieldCheck className="text-white w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white tracking-tight">Ghost Dashboard</h1>
-              <p className="text-sm text-neutral-500">Secure Communications Suite v2.0</p>
+              <h1 className="text-xl font-bold text-white tracking-tight">GhostDrop</h1>
+              <p className="text-sm text-neutral-500">Dashboard</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 text-xs font-bold px-3 py-1 bg-emerald-500/10 rounded-full border border-emerald-500/20 text-emerald-500 backdrop-blur-md">
-            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-            ENCRYPTED
-          </div>
-        </header>
+          <button 
+            onClick={() => setShowAboutModal(true)}
+            className="flex items-center gap-2 text-sm font-medium text-neutral-400 hover:text-white transition-colors bg-neutral-900/50 px-4 py-2 rounded-lg border border-white/5 hover:border-white/10"
+          >
+            <Info className="w-4 h-4" /> About / How to Use
+          </button>
+        </nav>
 
         {/* --- TABS --- */}
         <div className="flex justify-center">
           <div className="inline-flex bg-neutral-900/40 backdrop-blur-md p-1 rounded-xl border border-white/5">
-            <button onClick={() => setActiveTab("GHOST_DROP")} className={`px-6 py-2 text-sm font-medium rounded-lg transition-all ${activeTab === "GHOST_DROP" ? "bg-neutral-800 text-white shadow-sm border border-white/5" : "text-neutral-400 hover:text-white"}`}>GhostDrop</button>
-            <button onClick={() => setActiveTab("STEGANOGRAPHY")} className={`px-6 py-2 text-sm font-medium rounded-lg transition-all ${activeTab === "STEGANOGRAPHY" ? "bg-neutral-800 text-white shadow-sm border border-white/5" : "text-neutral-400 hover:text-white"}`}>Steganography</button>
+            <button onClick={() => setActiveTab("GHOST_DROP")} className={`px-6 py-2 text-sm font-medium rounded-lg transition-all ${activeTab === "GHOST_DROP" ? "bg-neutral-800 text-white shadow-sm border border-white/5" : "text-neutral-400 hover:text-white"}`}>Share Files</button>
+            <button onClick={() => setActiveTab("STEGANOGRAPHY")} className={`px-6 py-2 text-sm font-medium rounded-lg transition-all ${activeTab === "STEGANOGRAPHY" ? "bg-neutral-800 text-white shadow-sm border border-white/5" : "text-neutral-400 hover:text-white"}`}>Hide Secret Message</button>
           </div>
         </div>
 
@@ -770,14 +786,13 @@ function GhostContent() {
                     <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                     <div className="relative z-10">
                       <div className="w-12 h-12 bg-neutral-800/80 rounded-2xl flex items-center justify-center mb-6 text-indigo-400 border border-white/5 shadow-inner"><Radio className="w-6 h-6" /></div>
-                      <h3 className="text-xl font-bold text-white mb-2">Broadcast Signal</h3>
-                      <p className="text-neutral-400 text-sm">Create a secure P2P tunnel.</p>
+                      <h3 className="text-xl font-bold text-white mb-2">Send Files</h3>
+                      <p className="text-neutral-400 text-sm">Send files directly to another device.</p>
                     </div>
                   </motion.button>
                   <motion.button 
                       whileHover={{ scale: 1.02 }} 
                       onClick={() => {
-                          // 🟢 FORCE CLEAR on Click
                           setRoomId(""); 
                           setTransferMode("RECEIVE");
                       }} 
@@ -786,8 +801,8 @@ function GhostContent() {
                     <div className="absolute inset-0 bg-gradient-to-br from-violet-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                     <div className="relative z-10">
                       <div className="w-12 h-12 bg-neutral-800/80 rounded-2xl flex items-center justify-center mb-6 text-violet-400 border border-white/5 shadow-inner"><Signal className="w-6 h-6" /></div>
-                      <h3 className="text-xl font-bold text-white mb-2">Tune Frequency</h3>
-                      <p className="text-neutral-400 text-sm">Connect using a room code.</p>
+                      <h3 className="text-xl font-bold text-white mb-2">Receive Files</h3>
+                      <p className="text-neutral-400 text-sm">Enter a code to receive files.</p>
                     </div>
                   </motion.button>
                 </div>
@@ -797,7 +812,7 @@ function GhostContent() {
               {transferMode === "SEND" && (
                 <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-neutral-900/40 border border-white/10 rounded-3xl p-8 backdrop-blur-md min-h-[600px] flex flex-col relative overflow-hidden">
                     <div className="flex items-center justify-between mb-6 relative z-10">
-                        <button onClick={() => handleDisconnect(false)} className="flex items-center text-xs font-bold text-neutral-500 hover:text-white transition-colors uppercase tracking-wider"><ArrowLeft className="w-4 h-4 mr-1" /> Terminate</button>
+                        <button onClick={() => handleDisconnect(false)} className="flex items-center text-xs font-bold text-neutral-500 hover:text-white transition-colors uppercase tracking-wider"><ArrowLeft className="w-4 h-4 mr-1" /> Close Connection</button>
                     </div>
 
                     {linkWarning && (
@@ -808,7 +823,7 @@ function GhostContent() {
 
                     {!isConnected && (
                         <div className="flex-1 flex flex-col items-center justify-center space-y-8 animate-in fade-in relative z-10">
-                            <h2 className="text-2xl font-bold text-white animate-pulse">Waiting for Receiver...</h2>
+                            <h2 className="text-2xl font-bold text-white animate-pulse">Waiting for someone to connect...</h2>
                             {roomId && (
                                 <div ref={qrRef} className="bg-white p-4 rounded-2xl shadow-[0_0_40px_rgba(99,102,241,0.2)]">
                                     <QRCode value={roomId} size={180} />
@@ -872,13 +887,12 @@ function GhostContent() {
               {/* --- RECEIVER UI --- */}
               {transferMode === "RECEIVE" && (
                   <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} className="bg-neutral-900/40 border border-white/10 rounded-3xl p-8 backdrop-blur-md max-w-xl mx-auto min-h-[500px] flex flex-col relative overflow-hidden">
-                    {/* FIXED: Mobile Stacked Layout, Desktop Row Layout */}
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 relative z-10">
                         <button 
                             onClick={() => handleDisconnect(false)} 
                             className="self-start flex items-center text-xs font-bold text-neutral-500 hover:text-white transition-colors uppercase tracking-wider"
                         >
-                            <ArrowLeft className="w-4 h-4 mr-1" /> Terminate
+                            <ArrowLeft className="w-4 h-4 mr-1" /> Close Connection
                         </button>
                         <p className="text-violet-400 font-mono text-xs animate-pulse break-words text-left md:text-right">
                             {status}
@@ -894,13 +908,12 @@ function GhostContent() {
                     {!isConnected ? (
                         <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-in fade-in relative z-10">
                             <div className="text-center">
-                                <h2 className="text-2xl font-bold text-white">Tune Frequency</h2>
-                                <p className="text-neutral-500 text-sm mt-2">Enter 6-digit secure access code.</p>
+                                <h2 className="text-2xl font-bold text-white">Receive Files</h2>
+                                <p className="text-neutral-500 text-sm mt-2">Enter the 6-digit access code.</p>
                             </div>
                             
                             <div className="w-full space-y-4">
                                 <div className="relative">
-                                  {/* 🟢 ADDED: autoComplete='off' */}
                                   <input 
                                     type="text" 
                                     placeholder="000 000" 
@@ -912,7 +925,7 @@ function GhostContent() {
                                    />
                                   <button onClick={() => setIsScanning(true)} className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-violet-400 transition-colors border border-white/10"><QrCode size={20} /></button>
                                 </div>
-                                <button onClick={() => tuneFrequency()} className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-violet-900/20 flex items-center justify-center gap-2"><Zap className="w-4 h-4 fill-current" /> ESTABLISH LINK</button>
+                                <button onClick={() => tuneFrequency()} className="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-violet-900/20 flex items-center justify-center gap-2"><Zap className="w-4 h-4 fill-current" /> CONNECT</button>
                             </div>
                         </div>
                     ) : (
@@ -953,8 +966,8 @@ function GhostContent() {
           {activeTab === "STEGANOGRAPHY" && (
              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-neutral-900/40 border border-white/10 rounded-3xl overflow-hidden backdrop-blur-md">
                <div className="border-b border-white/5 px-6 py-4 flex gap-6">
-                 <button onClick={() => { setStegMode("ENCODE"); setSelectedImage(null); setFileName("") }} className={`text-sm font-bold transition-colors ${stegMode === "ENCODE" ? "text-indigo-400" : "text-neutral-500 hover:text-white"}`}>ENCODE (HIDE)</button>
-                 <button onClick={() => { setStegMode("DECODE"); setSelectedImage(null); setFileName("") }} className={`text-sm font-bold transition-colors ${stegMode === "DECODE" ? "text-indigo-400" : "text-neutral-500 hover:text-white"}`}>DECODE (REVEAL)</button>
+                 <button onClick={() => { setStegMode("ENCODE"); setSelectedImage(null); setFileName("") }} className={`text-sm font-bold transition-colors ${stegMode === "ENCODE" ? "text-indigo-400" : "text-neutral-500 hover:text-white"}`}>HIDE MESSAGE</button>
+                 <button onClick={() => { setStegMode("DECODE"); setSelectedImage(null); setFileName("") }} className={`text-sm font-bold transition-colors ${stegMode === "DECODE" ? "text-indigo-400" : "text-neutral-500 hover:text-white"}`}>REVEAL MESSAGE</button>
                </div>
                
                <div className="p-6 md:p-8 grid md:grid-cols-2 gap-12">
@@ -980,7 +993,7 @@ function GhostContent() {
 
                    {/* 2. IMAGE INPUT AREA */}
                    <div className="space-y-3">
-                     <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">{stegMode === "ENCODE" ? "Source Image" : "Encrypted Image"}</label>
+                     <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">{stegMode === "ENCODE" ? "Source Image" : "Image with Message"}</label>
                      
                      {/* OPTION A: UPLOAD */}
                      {(imageSource === "UPLOAD" || stegMode === "DECODE") && (
@@ -1006,7 +1019,6 @@ function GhostContent() {
                      {stegMode === "ENCODE" && imageSource === "GENERATE" && (
                          <div className="bg-neutral-900/50 border border-white/10 rounded-2xl p-4 space-y-3 h-48 flex flex-col justify-center">
                             <div className="relative">
-                                {/* REVERTED: Original Box Input */}
                                 <input 
                                     type="text" 
                                     value={aiPrompt}
@@ -1033,8 +1045,7 @@ function GhostContent() {
                    {/* 3. SECRET PAYLOAD INPUT */}
                    {stegMode === "ENCODE" && (
                      <div className="space-y-3">
-                       <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Secret Payload</label>
-                       {/* REVERTED: Original Box Input */}
+                       <label className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Secret Message</label>
                        <textarea 
                            value={secretMessage} 
                            onChange={(e) => setSecretMessage(e.target.value)} 
@@ -1047,7 +1058,7 @@ function GhostContent() {
                    {/* ACTION BUTTON */}
                    <button onClick={processSteganography} disabled={isProcessing || !selectedImage} className={`w-full py-3.5 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${isProcessing || !selectedImage ? "bg-neutral-800 text-neutral-500 cursor-not-allowed border border-white/5" : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg"}`}>
                      {isProcessing ? <Zap className="w-4 h-4 animate-spin" /> : stegMode === "ENCODE" ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                     {isProcessing ? "PROCESSING..." : stegMode === "ENCODE" ? "ENCRYPT & DOWNLOAD" : "DECRYPT IMAGE"}
+                     {isProcessing ? "PROCESSING..." : stegMode === "ENCODE" ? "HIDE MESSAGE & DOWNLOAD" : "REVEAL MESSAGE"}
                    </button>
                  </div>
                  
@@ -1056,7 +1067,7 @@ function GhostContent() {
                    {decodedMessage ? (
                      <div className="w-full animate-in zoom-in-95 duration-300">
                        <div className="flex items-center justify-between mb-4">
-                         <div className="flex items-center gap-2 text-emerald-500"><ScanLine className="w-5 h-5" /><span className="text-sm font-bold">DECRYPTED DATA</span></div>
+                         <div className="flex items-center gap-2 text-emerald-500"><ScanLine className="w-5 h-5" /><span className="text-sm font-bold">REVEALED MESSAGE</span></div>
                        </div>
                        <div className="bg-neutral-900 border border-emerald-500/30 rounded-xl p-6 shadow-[0_0_30px_rgba(16,185,129,0.1)] relative overflow-hidden group/code">
                           <button onClick={copyDecodedText} className="absolute top-3 right-3 p-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-lg transition-colors z-20 opacity-0 group-hover/code:opacity-100">

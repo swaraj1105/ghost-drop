@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { motion, useMotionTemplate, useMotionValue } from "framer-motion"; 
 import QRCode from "react-qr-code"; 
 import { Html5Qrcode } from "html5-qrcode";
-import { createRoom, joinRoom, sendFile, destroyRoom, type ConnectionHealth } from "@/lib/webrtcService";
+import { createRoom, joinRoom, sendFile, destroyRoom, type ConnectionHealth, type TransferProgress } from "@/lib/webrtcService";
 import { 
   Radio, Signal, Upload, Lock, Unlock, Zap, 
   Image as ImageIcon, ArrowRight, CheckCircle2, 
@@ -33,6 +33,59 @@ const linkWarningFor = (health: ConnectionHealth): string | null => {
   if (health === "interrupted") return "Connection interrupted. Waiting for the other device to come back...";
   return "Connection lost. If the other device doesn't come back soon, this connection will close automatically.";
 };
+
+// --- KEEP SCREEN AWAKE WHILE FILES MOVE ---
+// A phone that goes to sleep mid-transfer drops the connection, so ask the browser
+// to keep the screen on while `active` is true. Browsers without support just skip it.
+function useWakeLock(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    let lock: any = null;
+    let cancelled = false;
+
+    const acquire = async () => {
+      try {
+        const nav = navigator as any;
+        if (!nav.wakeLock || cancelled || document.visibilityState !== "visible") return;
+        lock = await nav.wakeLock.request("screen");
+        if (cancelled) { lock.release().catch(() => {}); lock = null; }
+      } catch {}
+    };
+    // The lock is released by the browser whenever the page is hidden, so take it again on return.
+    const onVisible = () => { if (document.visibilityState === "visible") acquire(); };
+
+    acquire();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      if (lock) lock.release().catch(() => {});
+    };
+  }, [active]);
+}
+
+const formatSize = (bytes: number) => {
+  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+};
+
+function ProgressBar({ label, done, total, accent }: { label: string; done: number; total: number; accent: "indigo" | "emerald" }) {
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 100;
+  const bar = accent === "indigo" ? "bg-indigo-500" : "bg-emerald-500";
+  return (
+    <div className="rounded-xl border border-white/5 bg-neutral-900/50 p-4">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <span className="text-sm text-white font-medium truncate">{label}</span>
+        <span className="text-xs text-neutral-400 shrink-0">{pct}%</span>
+      </div>
+      <div className="h-2 w-full rounded-full bg-neutral-800 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div className={`h-full rounded-full transition-all duration-200 ${bar}`} style={{ width: `${pct}%` }} />
+      </div>
+      <p className="text-xs text-neutral-500 mt-2">{formatSize(done)} of {formatSize(total)}</p>
+    </div>
+  );
+}
 
 function ScrambleText({ text, className }: { text: string, className?: string }) {
   const [displayText, setDisplayText] = useState("");
@@ -129,6 +182,8 @@ function GhostContent() {
   // --- SENDER STATE ---
   const [fileQueue, setFileQueue] = useState<File[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [sendProgress, setSendProgress] = useState<(TransferProgress & { index: number; count: number }) | null>(null);
+  const [receiveProgress, setReceiveProgress] = useState<TransferProgress | null>(null);
   const [showToast, setShowToast] = useState(false);
   const isSelfDisconnecting = useRef(false);
 
@@ -165,6 +220,9 @@ function GhostContent() {
     "Glitch art portrait, anonymous silhouette, digital noise"
   ];
 
+  // Keep the screen on while a file is moving in either direction.
+  useWakeLock(isSending || receiveProgress !== null);
+
   const randomizePrompt = () => {
     const random = CYBER_PROMPTS[Math.floor(Math.random() * CYBER_PROMPTS.length)];
     setAiPrompt(random);
@@ -199,6 +257,8 @@ function GhostContent() {
     setLinkWarning(null);
     setReceivedFiles([]); 
     setFileQueue([]);     
+    setSendProgress(null);
+    setReceiveProgress(null);
     setTransferMode("IDLE");
     if (showModal) setShowExitModal(true);
   };
@@ -327,7 +387,7 @@ function GhostContent() {
       for (let i = 0; i < fileQueue.length; i++) {
         const file = fileQueue[i];
         setStatus(`Sending [${i + 1}/${fileQueue.length}]: ${file.name}...`);
-        await sendFile(file);
+        await sendFile(file, (p) => setSendProgress({ ...p, index: i + 1, count: fileQueue.length }));
       }
       setStatus("All Files Sent.");
       setFileQueue([]); 
@@ -338,6 +398,7 @@ function GhostContent() {
       setStatus("Transfer Interrupted.");
     } finally {
       setIsSending(false); 
+      setSendProgress(null);
     }
   };
 
@@ -378,14 +439,16 @@ function GhostContent() {
           setIsConnected(true);
         },
         (blob, fileName) => {
-          setStatus("Receiving file...");
+          setStatus("File received.");
           const url = URL.createObjectURL(blob);
           setReceivedFiles(prev => [...prev, { name: fileName, data: url }]);
+          setReceiveProgress(null);
         },
         () => {
             if (!isSelfDisconnecting.current) handleDisconnect(true);
         },
-        (health) => setLinkWarning(linkWarningFor(health))
+        (health) => setLinkWarning(linkWarningFor(health)),
+        (p) => setReceiveProgress(p.done >= p.total && !p.error ? null : p)
       );
       rememberRoom(targetId);
     } catch (err) {
@@ -869,6 +932,16 @@ function GhostContent() {
                                     </div>
                                 </div>
 
+                                {sendProgress && (
+                                    <ProgressBar
+                                        label={`File ${sendProgress.index} of ${sendProgress.count}: ${sendProgress.name}`}
+                                        done={sendProgress.done}
+                                        total={sendProgress.total}
+                                        accent="indigo"
+                                    />
+                                )}
+                                {isSending && <p className="text-xs text-neutral-500 text-center">Keep this page open until sending finishes.</p>}
+
                                 <button 
                                     onClick={sendBatch}
                                     disabled={fileQueue.length === 0 || isSending}
@@ -934,6 +1007,22 @@ function GhostContent() {
                                 <h3 className="text-white font-bold flex items-center gap-2"><Download className="text-emerald-500" size={18}/> Incoming Stream</h3>
                                 <span className="text-xs font-mono text-neutral-500">{receivedFiles.length} FILES</span>
                             </div>
+
+                            {receiveProgress && (
+                                <div className="mb-4 space-y-2">
+                                    {receiveProgress.error ? (
+                                        <div className="px-4 py-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-sm">
+                                            {receiveProgress.name}: {receiveProgress.error}
+                                        </div>
+                                    ) : (
+                                        <ProgressBar label={`Receiving: ${receiveProgress.name}`} done={receiveProgress.done} total={receiveProgress.total} accent="emerald" />
+                                    )}
+                                    {receiveProgress.mode === "memory" && receiveProgress.total > 500 * 1024 * 1024 && !receiveProgress.error && (
+                                        <p className="text-xs text-neutral-500">This browser keeps incoming files in memory, so a file this large may fail. A recent Chrome or Edge handles big files best.</p>
+                                    )}
+                                    <p className="text-xs text-neutral-500">Keep this page open until the file arrives.</p>
+                                </div>
+                            )}
 
                             <div className="flex-1 bg-neutral-950/30 rounded-2xl border border-white/5 p-2 overflow-y-auto max-h-[400px] custom-scrollbar space-y-2">
                                 {receivedFiles.length === 0 && (

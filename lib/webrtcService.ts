@@ -55,10 +55,177 @@ const servers: RTCConfiguration = {
 let pc: RTCPeerConnection | null = null;
 let dataChannel: RTCDataChannel | null = null;
 
-// Receiver Variables
-let receivedChunks: ArrayBuffer[] = [];
-let metadata: { name: string, size: number, type: string } | null = null;
-let receivedBytes = 0;
+// --- Transfer progress (shown by the UI) ---
+export type TransferProgress = {
+  direction: "send" | "receive";
+  name: string;
+  done: number;             // bytes finished so far
+  total: number;            // size of the file in bytes
+  mode?: "disk" | "memory"; // receiving only: where the incoming file is being kept
+  error?: string;           // receiving only: set when the file could not be saved
+};
+
+// --- Receiving ---
+// Incoming data is NOT kept as thousands of loose chunks in memory. It is grouped
+// into ~1 MB pieces and, where the browser allows it, written straight to the
+// browser's private file storage (OPFS) on the device's disk. Browsers without
+// that fall back to memory, where pieces are kept as Blobs (browsers can park
+// those on disk too) rather than as JS buffers.
+const RX_FLUSH_BYTES = 1 * 1024 * 1024;
+const RX_DIR = "ghostdrop-incoming";
+const PROGRESS_EVERY_MS = 100;
+
+type Incoming = {
+  name: string;
+  size: number;
+  type: string;
+  received: number;
+  pending: ArrayBuffer[];
+  pendingBytes: number;
+  parts: Blob[];                       // memory mode
+  handle: any | null;                  // disk mode: FileSystemFileHandle
+  writer: any | null;                  // disk mode: FileSystemWritableFileStream
+  mode: "disk" | "memory";
+  lastReport: number;
+  failed: boolean;
+};
+type RxCallbacks = {
+  onFileReceived: (blob: Blob, name: string) => void;
+  onProgress?: (p: TransferProgress) => void;
+};
+
+let incoming: Incoming | null = null;
+// Messages are handled strictly one after another, because writing to disk is async
+// and the file pieces must land in order.
+let rxQueue: Promise<void> = Promise.resolve();
+
+async function openDiskFile(): Promise<{ handle: any; writer: any } | null> {
+  try {
+    const storage = (navigator as any).storage;
+    if (!storage || typeof storage.getDirectory !== "function") return null;
+    const root = await storage.getDirectory();
+    const dir = await root.getDirectoryHandle(RX_DIR, { create: true });
+    const handle = await dir.getFileHandle(`${Date.now()}-${Math.random().toString(36).slice(2)}`, { create: true });
+    if (typeof handle.createWritable !== "function") return null;
+    const writer = await handle.createWritable();
+    return { handle, writer };
+  } catch {
+    return null; // not supported here (or private mode): use memory instead
+  }
+}
+
+// Deletes every file we have parked on disk. Safe to call any time nothing is mid-transfer.
+async function clearDiskFiles() {
+  try {
+    const storage = (navigator as any).storage;
+    if (!storage || typeof storage.getDirectory !== "function") return;
+    const root = await storage.getDirectory();
+    await root.removeEntry(RX_DIR, { recursive: true });
+  } catch {}
+}
+
+function reportIncoming(inc: Incoming, cb: RxCallbacks, force: boolean) {
+  const now = Date.now();
+  if (!force && now - inc.lastReport < PROGRESS_EVERY_MS) return;
+  inc.lastReport = now;
+  cb.onProgress?.({
+    direction: "receive",
+    name: inc.name,
+    done: Math.min(inc.received, inc.size),
+    total: inc.size,
+    mode: inc.mode,
+    error: inc.failed ? "This file could not be saved. The device may be out of space." : undefined,
+  });
+}
+
+async function flushIncoming(inc: Incoming) {
+  if (inc.pending.length === 0) return;
+  const piece = new Blob(inc.pending);
+  inc.pending = [];
+  inc.pendingBytes = 0;
+  if (inc.mode === "disk" && inc.writer) {
+    await inc.writer.write(piece);
+  } else {
+    inc.parts.push(piece);
+  }
+}
+
+async function abortIncoming() {
+  const inc = incoming;
+  incoming = null;
+  if (inc?.writer) {
+    try { await inc.writer.abort(); } catch {}
+  }
+}
+
+async function finishIncoming(inc: Incoming, cb: RxCallbacks) {
+  await flushIncoming(inc);
+  let file: Blob;
+  if (inc.mode === "disk" && inc.writer) {
+    await inc.writer.close();
+    file = await inc.handle.getFile(); // a File backed by the disk, not by memory
+  } else {
+    file = new Blob(inc.parts, { type: inc.type });
+  }
+  incoming = null;
+  inc.received = inc.size;
+  reportIncoming(inc, cb, true);
+  cb.onFileReceived(file, inc.name);
+}
+
+async function handleIncomingMessage(data: unknown, cb: RxCallbacks) {
+  if (typeof data === "string") {
+    let meta: any;
+    try { meta = JSON.parse(data); } catch { return; }
+    if (!meta || typeof meta.name !== "string" || typeof meta.size !== "number" || !(meta.size >= 0)) return;
+
+    await abortIncoming(); // a new file is starting: drop anything half-finished
+    const disk = meta.size > 0 ? await openDiskFile() : null;
+    const inc: Incoming = {
+      name: meta.name,
+      size: meta.size,
+      type: typeof meta.type === "string" ? meta.type : "",
+      received: 0,
+      pending: [],
+      pendingBytes: 0,
+      parts: [],
+      handle: disk?.handle ?? null,
+      writer: disk?.writer ?? null,
+      mode: disk ? "disk" : "memory",
+      lastReport: 0,
+      failed: false,
+    };
+    incoming = inc;
+    console.log(`Receiving ${inc.name} (${inc.size} bytes, kept in ${inc.mode})`);
+    reportIncoming(inc, cb, true);
+    // An empty file sends no data at all, so it is complete as soon as we know about it.
+    if (inc.size === 0) await finishIncoming(inc, cb);
+    return;
+  }
+
+  if (data instanceof ArrayBuffer) {
+    const inc = incoming;
+    if (!inc || inc.failed) return;
+    inc.pending.push(data);
+    inc.pendingBytes += data.byteLength;
+    inc.received += data.byteLength;
+    try {
+      if (inc.received >= inc.size) {
+        await finishIncoming(inc, cb);
+        return;
+      }
+      if (inc.pendingBytes >= RX_FLUSH_BYTES) await flushIncoming(inc);
+    } catch (e) {
+      console.error("Could not save incoming file", e);
+      inc.failed = true;
+      inc.pending = [];
+      if (inc.writer) { try { await inc.writer.abort(); } catch {} inc.writer = null; }
+      reportIncoming(inc, cb, true);
+      return;
+    }
+    reportIncoming(inc, cb, false);
+  }
+}
 
 /**
  * NETWORK CANDIDATES (how two devices find a path to each other)
@@ -210,7 +377,8 @@ export const createRoom = async (
   onChannelOpen: () => void,
   onFileReceived: (blob: Blob, name: string) => void,
   onRoomDestroyed: () => void,
-  onConnectionHealth?: (health: ConnectionHealth) => void
+  onConnectionHealth?: (health: ConnectionHealth) => void,
+  onProgress?: (p: TransferProgress) => void
 ) => {
   stopWatching?.();
   if (pc) pc.close();
@@ -221,7 +389,7 @@ export const createRoom = async (
   stopWatching = watchConnection(pc, onConnectionHealth, onRoomDestroyed);
 
   dataChannel = pc.createDataChannel("ghost-drop");
-  setupChannel(dataChannel, onChannelOpen, onFileReceived);
+  setupChannel(dataChannel, onChannelOpen, onFileReceived, onProgress);
 
   const roomId = Math.floor(100000 + Math.random() * 900000).toString();
   const roomRef = ref(db, `rooms/${roomId}`);
@@ -277,8 +445,10 @@ export const joinRoom = async (
   onChannelOpen: () => void,
   onFileReceived: (blob: Blob, name: string) => void,
   onRoomDestroyed: () => void,
-  onConnectionHealth?: (health: ConnectionHealth) => void
+  onConnectionHealth?: (health: ConnectionHealth) => void,
+  onProgress?: (p: TransferProgress) => void
 ) => {
+  void clearDiskFiles(); // leftovers from an earlier session
   const roomRef = ref(db, `rooms/${roomId}`);
   const roomSnapshot = await get(roomRef);
   if (!roomSnapshot.exists()) throw new Error("Room not found");
@@ -293,7 +463,7 @@ export const joinRoom = async (
 
   pc.ondatachannel = (e) => {
     dataChannel = e.channel;
-    setupChannel(dataChannel, onChannelOpen, onFileReceived);
+    setupChannel(dataChannel, onChannelOpen, onFileReceived, onProgress);
   };
 
   const calleeCandidatesRef = child(roomRef, "calleeCandidates");
@@ -326,7 +496,8 @@ export const joinRoom = async (
 /**
  * HELPER: Handle Data Stream
  */
-function setupChannel(channel: RTCDataChannel, onOpen: () => void, onFileReceived: (blob: Blob, name: string) => void) {
+function setupChannel(channel: RTCDataChannel, onOpen: () => void, onFileReceived: (blob: Blob, name: string) => void, onProgress?: (p: TransferProgress) => void) {
+  const cb: RxCallbacks = { onFileReceived, onProgress };
   // Some browsers deliver binary data as a Blob by default; the receiving code
   // below expects an ArrayBuffer, so say so explicitly.
   channel.binaryType = "arraybuffer";
@@ -336,36 +507,23 @@ function setupChannel(channel: RTCDataChannel, onOpen: () => void, onFileReceive
     onOpen();
   };
 
-  channel.onmessage = async (event) => {
+  channel.onmessage = (event) => {
     const data = event.data;
-
-    if (typeof data === "string") {
-      metadata = JSON.parse(data);
-      receivedChunks = [];
-      receivedBytes = 0;
-      console.log(`Receiving ${metadata?.name} (${metadata?.size} bytes)`);
-      return;
-    }
-
-    if (data instanceof ArrayBuffer) {
-      receivedChunks.push(data);
-      receivedBytes += data.byteLength;
-
-      if (metadata && receivedBytes >= metadata.size) {
-        const fileBlob = new Blob(receivedChunks);
-        onFileReceived(fileBlob, metadata.name);
-        receivedChunks = [];
-        metadata = null;
-        receivedBytes = 0;
-      }
-    }
+    rxQueue = rxQueue
+      .then(() => handleIncomingMessage(data, cb))
+      .catch((e) => console.error("Receive error", e));
   };
+
+  // If the link drops mid-file, throw away the unfinished piece.
+  channel.addEventListener("close", () => {
+    rxQueue = rxQueue.then(abortIncoming).catch(() => {});
+  });
 }
 
 /**
  * 3. PUBLIC: Send File (Streaming Mode)
  */
-export const sendFile = async (file: File) => {
+export const sendFile = async (file: File, onProgress?: (p: TransferProgress) => void) => {
   // Throw (don't silently return) so the UI can say "Transfer Interrupted"
   // instead of "All Transfers Complete" when the link is down.
   const channel = dataChannel;
@@ -376,7 +534,21 @@ export const sendFile = async (file: File) => {
   const meta = JSON.stringify({ name: file.name, size: file.size, type: file.type });
   channel.send(meta);
 
+  let lastReport = 0;
+  const report = (force: boolean) => {
+    if (!onProgress) return;
+    const now = Date.now();
+    if (!force && now - lastReport < PROGRESS_EVERY_MS) return;
+    lastReport = now;
+    // Bytes still queued in the channel have not reached the other device yet.
+    const delivered = force && offset >= file.size && channel.bufferedAmount === 0
+      ? file.size
+      : Math.max(0, Math.min(offset, file.size) - channel.bufferedAmount);
+    onProgress({ direction: "send", name: file.name, done: delivered, total: file.size });
+  };
+
   let offset = 0;
+  report(true);
   while (offset < file.size) {
     // Backpressure: reading a file is far faster than the network can carry it,
     // so the channel's send buffer fills up. If it overflows (browsers cap it at
@@ -389,12 +561,14 @@ export const sendFile = async (file: File) => {
     const buffer = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
     channel.send(buffer);
     offset += CHUNK_SIZE;
+    report(false);
   }
 
   // Everything has been handed to the channel, but it may still be queued.
   // Wait until it has really left before reporting success, otherwise a
   // "complete" message could appear while the end of the file is still on its way.
   await waitForBufferBelow(channel, 0);
+  report(true);
 };
 
 /**
@@ -443,6 +617,9 @@ export const destroyRoom = async (roomId: string) => {
   stopWatching?.();
   stopWatching = null;
   pendingCandidates = [];
+
+  // Drop any half-received file and delete received files parked on this device's disk
+  rxQueue = rxQueue.then(abortIncoming).then(clearDiskFiles).catch(() => {});
 
   // Close local connections immediately
   if (pc) {
